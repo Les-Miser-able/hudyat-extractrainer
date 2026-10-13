@@ -14,23 +14,42 @@ A TensorFlow trainer with automatic hand-landmark extraction from raw images and
 
 ## Local training dashboard
 
-Start the browser UI from the repository root:
+On Windows, install the optional desktop window dependency into the Python
+environment you use for training, then start FSL Studio from the repository root:
 
 ```powershell
+python -m pip install -r requirements-desktop.txt
 python dashboard.py
 ```
 
-Open **http://localhost:8090**. FSL Studio provides an overview of real source
+FSL Studio opens in its own resizable desktop window, with no browser tabs or
+address bar. It displays the existing dashboard using Microsoft Edge WebView2;
+no interface rewrite, executable packaging, or installer is needed. The terminal
+stays available for diagnostics. If the window cannot open, install or repair the
+[Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/).
+
+To use a browser instead (also supported outside Windows), run
+`python dashboard.py --browser` and open **http://localhost:8090**. Browser mode
+does not need the desktop dependencies.
+
+FSL Studio provides an overview of real source
 counts and model scores, dataset preparation and validation, configurable training,
 saved-run comparisons with learning curves, and prediction from a project-local
 image, video, or `.npy` file. Activity logs stream while jobs run; use **Stop job**
 to cancel. Partial outputs are kept, so choose a new output folder/run name to retry.
 
-The dashboard itself uses only Python's standard library. Preparation, training,
+The dashboard's browser mode uses only Python's standard library. Preparation, training,
 and prediction use the **same Python environment that starts the dashboard** and
 need the dependencies in `requirements.txt`. If using the quick-start environment,
 launch it with `.\.venv\Scripts\python.exe dashboard.py`. Browsing saved results
-does not require TensorFlow. Use `--port 8091` if the default port is occupied.
+does not require TensorFlow. Install desktop dependencies with
+`.\.venv\Scripts\python.exe -m pip install -r requirements-desktop.txt` when using
+that environment. Use `--port 8091` if the default port is occupied.
+
+Closing the desktop window stops the local server and camera workers. If a job
+is running, FSL Studio asks before stopping it; Cancel keeps the window and job
+running. Confirming exit keeps partial outputs. In browser mode, stop the server
+with Ctrl+C in its terminal.
 
 The default source root is `data`, dataset root is `datasets_augmented`, and model
 root is `runs`. Change the first two under **Datasets → Project folders → Scan
@@ -66,7 +85,8 @@ environment containing `requirements.txt`.
 
 If `/api/live/start` returns 404 after updating the project, the running dashboard
 still has the previous Python code loaded. Finish any active job, stop the server,
-restart `dashboard.py` in the same Python environment, and refresh the browser.
+restart `dashboard.py` in the same Python environment (with `--browser` if using
+browser mode), and reopen the camera.
 Refreshing the page alone updates browser files but does not reload Python routes.
 
 Camera frames travel only to the local dashboard worker and are not written to

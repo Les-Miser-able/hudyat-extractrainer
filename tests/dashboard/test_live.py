@@ -2,6 +2,8 @@
 from pathlib import Path
 import subprocess
 import sys
+import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -61,3 +63,32 @@ class LiveControllerTests(unittest.TestCase):
             self.assertEqual(self.live.reset(ready['session'])['status'], 'waiting')
             self.assertEqual(starts.call_count, 1)
             self.assertTrue(self.jobs.live_active)
+
+    def test_shutdown_interrupts_a_pending_camera_response(self):
+        script = ("import json,sys,time; print(json.dumps({'ready':True}),flush=True); "
+                  "sys.stdin.readline(); print('frame received',file=sys.stderr,flush=True); time.sleep(60)")
+        with self.worker(script):
+            ready = self.live.start('fixture', None, 'pose')
+            process = self.live.process
+            errors = []
+
+            def frame():
+                try:
+                    self.live.frame(ready['session'], 'fixture', 1)
+                except ValueError as error:
+                    errors.append(str(error))
+
+            thread = threading.Thread(target=frame, daemon=True)
+            thread.start()
+            deadline = time.monotonic() + 5
+            while not self.live.errors and time.monotonic() < deadline:
+                time.sleep(.01)
+            self.assertIn('frame received', self.live.errors)
+            self.live.shutdown()
+            thread.join(timeout=5)
+            self.assertFalse(thread.is_alive())
+            self.assertIsNotNone(process.poll())
+            self.assertTrue(errors)
+            self.assertFalse(self.jobs.live_active)
+            with self.assertRaisesRegex(ValueError, 'closing'):
+                self.live.start('fixture', None, 'pose')

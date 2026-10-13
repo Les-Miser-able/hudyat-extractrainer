@@ -10,6 +10,7 @@ import math
 import mimetypes
 from pathlib import Path
 import secrets
+import socket
 import subprocess
 import sys
 import threading
@@ -233,9 +234,12 @@ class Jobs:
         self.items = deque(maxlen=30)
         self.process = None
         self.live_active = False
+        self.closed = False
 
     def start(self, data):
         with self.lock:
+            if self.closed:
+                raise ValueError("The dashboard is closing.")
             if self.live_active:
                 raise ValueError("Stop live camera prediction before starting a job.")
             if self.process and self.process.poll() is None:
@@ -283,8 +287,28 @@ class Jobs:
 
     def shutdown(self):
         with self.lock:
-            if self.process and self.process.poll() is None:
-                self.process.terminate()
+            self.closed = True
+            process = self.process
+        if process and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+
+    def request_close(self, confirm):
+        """Freeze new jobs on exit, asking first when a worker is running."""
+        with self.lock:
+            if not self.process or self.process.poll() is not None:
+                self.closed = True
+                return True
+        # Never hold the job lock while a human is answering a dialog.
+        if not confirm():
+            return False
+        with self.lock:
+            self.closed = True
+        return True
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -396,24 +420,69 @@ class Handler(BaseHTTPRequestHandler):
             super().log_message(format, *args)
 
 
-def main():
+class DashboardHTTPServer(ThreadingHTTPServer):
+    # Windows SO_REUSEADDR permits a second dashboard to bind the same port.
+    allow_reuse_address = sys.platform != "win32"
+
+    def server_bind(self):
+        if sys.platform == "win32":
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8090)
-    args = parser.parse_args()
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
-    server.token = secrets.token_hex(32)
-    server.jobs = Jobs()
-    server.live = LiveInference(server.jobs, BASE)
-    print(f"FSL Studio: http://localhost:{server.server_port}", flush=True)
-    print(f"Worker Python: {sys.executable}\nPress Ctrl+C to stop.", flush=True)
+    parser.add_argument("--browser", action="store_true",
+                        help="Serve the browser UI without opening a desktop window.")
+    args = parser.parse_args(argv)
+    if not 0 <= args.port <= 65535:
+        parser.error("--port must be between 0 and 65535 (0 selects a free port).")
+    desktop = None
+    if not args.browser:
+        from .desktop import DesktopWindow
+        try:
+            desktop = DesktopWindow()
+        except RuntimeError as error:
+            parser.exit(1, f"FSL Studio: {error}\n")
     try:
-        server.serve_forever()
+        server = DashboardHTTPServer(("127.0.0.1", args.port), Handler)
+    except OSError as error:
+        parser.exit(1, f"FSL Studio could not bind port {args.port}: {error}\n"
+                    "Stop the other dashboard or use --port 8091.\n")
+    thread = None
+    try:
+        server.token = secrets.token_hex(32)
+        server.jobs = Jobs()
+        server.live = LiveInference(server.jobs, BASE)
+        url = f"http://localhost:{server.server_port}"
+        print(f"FSL Studio: {url}", flush=True)
+        print(f"Worker Python: {sys.executable}", flush=True)
+        if desktop is None:
+            print("Open the URL in your browser. Press Ctrl+C to stop.", flush=True)
+            server.serve_forever()
+        else:
+            print("Close the FSL Studio window to stop.", flush=True)
+            thread = threading.Thread(target=server.serve_forever, name="dashboard-http", daemon=True)
+            thread.start()
+            desktop.run(url, server.jobs)
     except KeyboardInterrupt:
         pass
+    except RuntimeError as error:
+        parser.exit(1, f"FSL Studio: {error}\n")
     finally:
-        server.live.shutdown()
-        server.jobs.shutdown()
-        server.server_close()
+        try:
+            if thread is not None and thread.is_alive():
+                server.shutdown()
+                thread.join(timeout=5)
+            if hasattr(server, "jobs"):
+                server.jobs.shutdown()
+        finally:
+            try:
+                if hasattr(server, "live"):
+                    server.live.shutdown()
+            finally:
+                server.server_close()
 
 
 if __name__ == "__main__":
