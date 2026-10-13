@@ -9,6 +9,10 @@ import sys
 import time
 import numpy as np
 from ..progress import Stage, progress
+from ..data.sequences import resample
+from ..data.augmentation import augment_sequence, configuration, build_report
+from ..data.augmentation_options import add_arguments
+from ..data.source_selection import add_arguments as add_source_arguments, folder_selection, source_files
 
 FRAMES, FEATURES = 32, 128
 LAYOUT = ["left_xyz_landmarks_0_to_20", "right_xyz_landmarks_0_to_20",
@@ -21,17 +25,28 @@ def save_json(path, value):
 
 def save_augmentation_summary(root, manifest):
     """Count accepted originals separately from generated output sequences."""
+    report_path = Path(root) / "video_augmentation_report.json"
+    video_report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.is_file() else None
+
     def counts(rows):
         sources = {row["source"]: row["static"] for row in rows}
         static = sum(sources.values())
-        return {
+        result = {
             "original_sources": len(sources),
             "static_sources": static,
             "sequence_sources": len(sources) - static,
-            "augmented_static_sequences": sum(bool(row["synthetic"]) for row in rows),
+            "augmented_static_sequences": sum(bool(row["synthetic"]) and row["static"] for row in rows),
             "resampled_sequences": sum(not row["synthetic"] for row in rows),
             "total_output_sequences": len(rows),
         }
+        if video_report is not None:
+            details = [item for item in video_report["sources"] if item["source"] in sources]
+            result["augmented_sequence_samples"] = sum(
+                row["synthetic"] and not row["static"] for row in rows)
+            for field in ("requested_extra_samples", "unfilled_extra_samples",
+                          "duplicate_candidates", "invalid_candidates"):
+                result[field] = sum(item[field] for item in details)
+        return result
 
     summary = counts(manifest)
     summary["by_split"] = {
@@ -47,6 +62,17 @@ def save_augmentation_summary(root, manifest):
           f"({summary['static_sources']:,} static, {summary['sequence_sources']:,} video/sequence)")
     print(f"Augmented static sequences: {summary['augmented_static_sequences']:,}")
     print(f"Resampled video/sequence outputs: {summary['resampled_sequences']:,}")
+    if video_report is not None:
+        print(f"Video/sequence extras generated: {summary['augmented_sequence_samples']:,} "
+              f"of {summary['requested_extra_samples']:,} requested; "
+              f"{summary['unfilled_extra_samples']:,} unfilled.", flush=True)
+        print(f"Skipped candidates: {summary['duplicate_candidates']:,} duplicate, "
+              f"{summary['invalid_candidates']:,} invalid.", flush=True)
+        for item in video_report["sources"]:
+            if item["unfilled_extra_samples"]:
+                print(f"  {item['source']}: {item['generated_extra_samples']} of "
+                      f"{item['requested_extra_samples']} extras generated "
+                      f"({', '.join(item['shortfall_reasons'])}).", flush=True)
     print(f"Total output sequences: {summary['total_output_sequences']:,}")
     print("By split (output sequences):")
     for split, values in summary["by_split"].items():
@@ -82,19 +108,6 @@ def load_sequence(path, fixed=False):
     if not x[:, 126:].any():
         raise ValueError(f"{path}: no hand present in the entire sample")
     return x
-
-
-def resample(x):
-    """Linearly interpolate coordinates on a uniform timeline; flags use nearest."""
-    timeline = np.linspace(0, len(x) - 1, FRAMES)
-    out = np.empty((FRAMES, FEATURES), dtype=np.float32)
-    for col in range(126):
-        out[:, col] = np.interp(timeline, np.arange(len(x)), x[:, col])
-    nearest = np.floor(timeline + 0.5).astype(int)
-    out[:, 126:] = x[nearest, 126:]
-    for hand in range(2):
-        out[out[:, 126 + hand] == 0, hand * 63:(hand + 1) * 63] = 0
-    return out
 
 
 def synthetic_sequence(frame, rng, jitter=0.0075):
@@ -158,6 +171,8 @@ def split_sources(records, val_fraction, test_fraction, seed):
 
 
 def prepare(args):
+    video_settings = configuration(getattr(args, "video_extra_samples", 0),
+                                   getattr(args, "video_time_warp", .05), args.seed)
     source, dest = Path(args.source).resolve(), Path(args.output).resolve()
     if not source.is_dir():
         raise ValueError(f"Source directory not found: {source}")
@@ -165,9 +180,14 @@ def prepare(args):
         raise ValueError("Source and output must be separate, non-nested directories")
     if dest.exists() and any(dest.iterdir()):
         raise ValueError("Output must be empty; existing datasets are never overwritten")
+    selected = folder_selection(getattr(args, "source_folders", None))
+    videos_only = getattr(args, "videos_only", False)
+    filtered = selected is not None or videos_only
     if not getattr(args, "_landmarks_only", False):
-        from ..data.extraction import source_files, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, prepare_media
-        if any(p.suffix.lower() in IMAGE_EXTENSIONS | VIDEO_EXTENSIONS for p in source_files(source)):
+        from ..data.extraction import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, prepare_media
+        media_files = [p for folder in source.iterdir() if folder.is_dir() and not folder.name.startswith(".")
+                       for p in source_files(folder, selected, videos_only)]
+        if any(p.suffix.lower() in IMAGE_EXTENSIONS | VIDEO_EXTENSIONS for p in media_files):
             return prepare_media(args, prepare)
     mapping = None
     if args.groups:
@@ -179,12 +199,16 @@ def prepare(args):
             if key in mapping or not group:
                 raise ValueError("Group CSV has duplicate paths or empty group IDs")
             mapping[key] = group
-    records, fingerprints = [], {}
+    records, fingerprints, excluded_classes = [], {}, []
     for folder in progress(sorted(source.iterdir()), "Checking source classes"):
         if not folder.is_dir() or folder.name.startswith("."):
             continue
-        paths = sorted(folder.glob("*.npy"))
+        paths = ([p for p in source_files(folder, selected, videos_only) if p.suffix.lower() == ".npy"]
+                 if filtered else sorted(folder.glob("*.npy")))
         if not paths:
+            if filtered:
+                excluded_classes.append(folder.name)
+                continue
             raise ValueError(f"Class folder has no .npy samples: {folder}")
         for path in progress(paths, f"Checking {folder.name} landmark files"):
             relative = path.relative_to(source).as_posix()
@@ -208,7 +232,9 @@ def prepare(args):
     dest.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(args.seed)
     manifest = []
-    print(f"Generating {sum(args.static_variants if r['static'] else 1 for r in records):,} sequences from {len(records):,} source files.", flush=True)
+    video_sources = []
+    kind = "base sequences" if video_settings else "sequences"
+    print(f"Generating {sum(args.static_variants if r['static'] else 1 for r in records):,} {kind} from {len(records):,} source files.", flush=True)
     for record in progress(records, "Generating and saving sequences (source files)"):
         split = assignment[record["group"]]
         x = load_sequence(source / record["source"])
@@ -225,6 +251,18 @@ def prepare(args):
             np.save(dest / relative, sequence.astype(np.float32), allow_pickle=False)
             manifest.append({**record, "split": split, "path": relative.as_posix(),
                              "variant": variant, "variant_of": record["source"], "synthetic": record["static"]})
+        if video_settings and not record["static"] and split == "train":
+            extras, detail = augment_sequence(x, record["source"], args.seed,
+                                      video_settings["extra_samples"],
+                                      video_settings["max_displacement"])
+            video_sources.append({**detail, "label": record["label"], "group": record["group"],
+                                  "split": split})
+            for variant, (sequence, transformation) in enumerate(extras, 1):
+                relative = Path(split) / record["label"] / f"{token}_{variant:03d}.npy"
+                np.save(dest / relative, sequence, allow_pickle=False)
+                manifest.append({**record, "split": split, "path": relative.as_posix(),
+                                 "variant": variant, "variant_of": record["source"],
+                                 "synthetic": True, "augmentation": transformation})
     print("Saving dataset manifest and preprocessing settings...", flush=True)
     save_json(dest / "manifest.json", manifest)
     save_json(dest / "preprocessing.json", {
@@ -235,6 +273,17 @@ def prepare(args):
         "static_variants": args.static_variants, "jitter_std": args.jitter,
         "static_method": "repeat + independent per-timestep Gaussian coordinate noise",
         "grouping": "provided CSV" if mapping is not None else "original source file"})
+    if filtered:
+        metadata = json.loads((dest / "preprocessing.json").read_text(encoding="utf-8"))
+        metadata["source_selection"] = {"folders": selected, "videos_only": videos_only,
+                                        "selected_files": len(records), "excluded_classes": excluded_classes}
+        save_json(dest / "preprocessing.json", metadata)
+    if video_settings:
+        metadata = json.loads((dest / "preprocessing.json").read_text(encoding="utf-8"))
+        metadata["video_augmentation"] = video_settings
+        save_json(dest / "preprocessing.json", metadata)
+        save_json(dest / "video_augmentation_report.json", build_report(
+            video_settings, video_sources, sum(not record["static"] for record in records)))
     print(json.dumps(inspect_dataset(dest)[2], indent=2), flush=True)
     print("Sequence generation and dataset validation complete.", flush=True)
     if not getattr(args, "_landmarks_only", False):
@@ -379,6 +428,9 @@ def train(args):
     save_json(output / "training_config.json", config)
     (output / "preprocessing.json").write_text(
         (root / "preprocessing.json").read_text(encoding="utf-8"), encoding="utf-8")
+    augmentation_report = root / "video_augmentation_report.json"
+    if augmentation_report.is_file():
+        (output / augmentation_report.name).write_bytes(augmentation_report.read_bytes())
     resume = getattr(args, "resume_from", None)
     if resume:
         saved_classes = json.loads((Path(resume).parent / "classes.json").read_text(encoding="utf-8"))
@@ -503,6 +555,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     prep = sub.add_parser("prepare", help="Split original sources, resample videos, synthesize grouped image variants")
+    add_arguments(prep)
+    add_source_arguments(prep)
     prep.add_argument("--source", required=True)
     prep.add_argument("--output", required=True)
     prep.add_argument("--groups", help="Optional CSV: path,group; use signer/session IDs")

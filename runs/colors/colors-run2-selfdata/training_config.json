@@ -1,0 +1,36 @@
+{
+  "command": "train",
+  "dataset": "C:\\Users\\Russel\\Desktop\\trainer\\datasets_augmented\\colors",
+  "output": "C:\\Users\\Russel\\Desktop\\trainer\\runs\\colors\\colors-run2-selfdata",
+  "epochs": 100,
+  "batch_size": 10,
+  "learning_rate": 0.001,
+  "patience": 1,
+  "seed": 42,
+  "class_weights": false,
+  "loader": "packed",
+  "resume_from": null,
+  "tensorflow_version": "2.21.0",
+  "split_counts": {
+    "test": {
+      "blue": 7,
+      "green": 7,
+      "orange": 7,
+      "red": 7
+    },
+    "train": {
+      "blue": 31,
+      "green": 31,
+      "orange": 31,
+      "red": 31
+    },
+    "validation": {
+      "blue": 7,
+      "green": 7,
+      "orange": 7,
+      "red": 7
+    }
+  },
+  "actual_optimizer_learning_rate": 0.0010000000474974513,
+  "data_loader": "packed"
+}

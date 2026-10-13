@@ -1,0 +1,201 @@
+{
+  "accuracy": 0.21428571428571427,
+  "macro_f1": 0.12229472733323825,
+  "confusion_matrix_rows_true_columns_predicted": [
+    [
+      5,
+      0,
+      0,
+      0,
+      1,
+      0,
+      1,
+      0,
+      0,
+      0
+    ],
+    [
+      6,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      5,
+      0,
+      0,
+      0,
+      1,
+      0,
+      1,
+      0,
+      0,
+      0
+    ],
+    [
+      7,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      2,
+      0,
+      5,
+      0,
+      0,
+      0
+    ],
+    [
+      3,
+      3,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      7,
+      0,
+      0,
+      0
+    ],
+    [
+      6,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      6,
+      0,
+      1,
+      0
+    ],
+    [
+      2,
+      0,
+      0,
+      0,
+      5,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  ],
+  "classes": [
+    "good_afternoon",
+    "good_evening",
+    "good_morning",
+    "hello",
+    "how_are_you",
+    "im_fine",
+    "nice_to_meet_you",
+    "see_you_tomorrow",
+    "thank_you",
+    "youre_welcome"
+  ],
+  "per_class": {
+    "good_afternoon": {
+      "precision": 0.14705882352941177,
+      "recall": 0.7142857142857143,
+      "f1": 0.24390243902439024,
+      "support": 7
+    },
+    "good_evening": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "support": 7
+    },
+    "good_morning": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "support": 7
+    },
+    "hello": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "support": 7
+    },
+    "how_are_you": {
+      "precision": 0.16666666666666666,
+      "recall": 0.2857142857142857,
+      "f1": 0.2105263157894737,
+      "support": 7
+    },
+    "im_fine": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "support": 7
+    },
+    "nice_to_meet_you": {
+      "precision": 0.35,
+      "recall": 1.0,
+      "f1": 0.5185185185185185,
+      "support": 7
+    },
+    "see_you_tomorrow": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "support": 7
+    },
+    "thank_you": {
+      "precision": 1.0,
+      "recall": 0.14285714285714285,
+      "f1": 0.25,
+      "support": 7
+    },
+    "youre_welcome": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "support": 7
+    }
+  },
+  "loss": 1.8322938680648804
+}

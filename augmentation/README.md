@@ -1,7 +1,9 @@
 # Data augmentation workspace
 
-This is a folder scaffold for future augmentation work. No new transforms or
-configuration loader are implemented yet.
+Executable video/sequence timing augmentation lives in
+`fsl_trainer/data/augmentation.py`. This folder retains scaffolding for future
+presets, previews, reports, and additional experiments; a preset loader is not
+implemented.
 
 ```text
 data/<category>/<gesture>/       Original images, videos, or landmark arrays
@@ -45,14 +47,40 @@ Successful preparation prints accepted original-source counts, augmented static
 sequence counts, resampled video/sequence counts, and total output sequences,
 plus totals per split and gesture. It also saves `augmentation_summary.json`
 inside the prepared category folder. Rejected or ignored sources are excluded.
-Eight static variants means eight outputs per static source, not nine; videos
-and multi-frame landmark inputs each produce one resampled output, not new
-augmented variants. Existing prepared datasets are not changed automatically.
+Eight static variants means eight outputs per static source, not nine. Videos
+and multi-frame landmark inputs produce one resampled original by default.
+Optional timing augmentation adds distinct training samples as described below.
+Existing prepared datasets are not changed automatically.
+
+## Video / sequence timing augmentation
+
+```powershell
+python categories.py prepare --category alphabet --datasets datasets_video_v1 --video-extra-samples 3 --video-time-warp 0.05
+```
+
+Extra samples range from 0 to 1000 (default 0, off). Timing strength is greater
+than 0 through 0.10, default 0.05. Each eligible training source keeps its original
+and gains up to the requested number of distinct, valid timing variations.
+Validation/test videos are unchanged. Static augmentation retains its existing
+behavior in all splits. No new video files are written.
+
+The seeded transform changes progression within the full gesture, preserving
+endpoints, movement order, hand slots, presence flags, and `(32,128)` arrays.
+Ten attempts per requested extra bound duplicate/invalid candidate retries. A
+shortfall is reported instead of padding with duplicates or failing solely for
+missing extras. Reports use original raw filenames when extraction is involved.
+
+Enabled preparation records settings in `preprocessing.json`, actual timing maps
+in the manifest, separate generated-sequence counts in the summary, and detailed
+counts/reasons in `video_augmentation_report.json`. Training retains the report
+in its run directory. Inference applies no augmentation. See the
+[feature design](../docs/design/video-augmentation.md) for the complete contract.
 
 ## Future implementation
 
-- Add transform implementations under `transforms/` and their tests under
-  `tests/`. Put documented presets under `configs/` once a loader is implemented.
+- Keep executable transforms with `fsl_trainer/data/` and integration checks
+  with the project tests. Put documented presets under `configs/` once a loader
+  is implemented.
 - Integrate new augmentation after source-group split assignment. Apply new
   random transforms to training samples only; keep evaluation preprocessing
   deterministic. Changing existing validation/test jitter is a separate code change.

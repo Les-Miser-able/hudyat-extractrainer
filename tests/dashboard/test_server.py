@@ -69,6 +69,26 @@ class DashboardTests(unittest.TestCase):
         self.assertIn(str(self.source / "sample.jpg"), command)
         self.assertFalse((self.root / "runs" / "alphabet" / "fresh").exists())
 
+    def test_video_controls_forward_and_reject_invalid_values(self):
+        second = self.source.parent / "B"
+        second.mkdir()
+        for folder in (self.source, second):
+            for index in range(3):
+                (folder / f"source-{index}.mp4").write_bytes(b"fixture")
+        request = {"action": "prepare", "category": "alphabet", "datasets": "fresh_datasets"}
+        baseline = dashboard.build_command(request)
+        self.assertNotIn("--video-extra-samples", baseline)
+        command = dashboard.build_command({**request, "video_extra_samples": 3, "video_time_warp": .05})
+        self.assertIn("--video-extra-samples", command)
+        self.assertEqual(command[command.index("--video-extra-samples") + 1], "3")
+        self.assertEqual(command[command.index("--video-time-warp") + 1], "0.05")
+        for key, values in (("video_extra_samples", (-1, 1.5, True, False, 1001, "NaN")),
+                            ("video_time_warp", (0, -.01, .11, True, "NaN", "inf"))):
+            for value in values:
+                with self.subTest(key=key, value=value), self.assertRaises(ValueError):
+                    dashboard.build_command({**request, key: value})
+        self.assertFalse((self.root / "fresh_datasets").exists())
+
     def wait_job(self, jobs):
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
@@ -77,6 +97,31 @@ class DashboardTests(unittest.TestCase):
                 return snapshot[0]
             time.sleep(.02)
         self.fail("Worker did not finish")
+
+    def test_folder_selection_counts_and_worker_command(self):
+        for label in ("blue", "red", "violet"):
+            for name in ("S1", "S2", "S4", "PUB"):
+                folder = self.root / "data" / "colors" / label / name
+                folder.mkdir(parents=True)
+                if label != "violet" or name == "PUB":
+                    (folder / "clip.MP4").touch()
+            (self.root / "data" / "colors" / label / "PUB" / "photo.jpg").touch()
+        row = next(c for c in dashboard.inventory() if c["name"] == "colors")
+        self.assertEqual(row["samples"], 12)
+        blue = next(c for c in row["classes"] if c["name"] == "blue")
+        self.assertEqual(blue["folders"]["S4"], {"samples": 1, "videos": 1})
+        self.assertEqual(blue["folders"]["PUB"], {"samples": 2, "videos": 1})
+        request = {"action": "prepare", "category": "colors", "datasets": "fresh",
+                   "source_folders": ["S1", "S2", "S4"], "videos_only": True}
+        command = dashboard.build_command(request)
+        self.assertEqual([command[i + 1] for i, value in enumerate(command) if value == "--source-folder"],
+                         ["S1", "S2", "S4"])
+        self.assertIn("--videos-only", command)
+        self.assertNotIn("PUB", command)
+        for folders in ([], ["PUB"], ["missing"], ["../PUB"], "S1"):
+            with self.subTest(folders=folders), self.assertRaises(ValueError):
+                dashboard.build_command({**request, "source_folders": folders})
+        self.assertFalse((self.root / "fresh").exists())
 
     def test_empty_sources_are_rejected_before_a_worker_starts(self):
         empty = self.root / "data" / "empty"
@@ -147,12 +192,14 @@ class DashboardHTTPTests(unittest.TestCase):
         cls.server = dashboard.ThreadingHTTPServer(("127.0.0.1", 0), dashboard.Handler)
         cls.server.token = "test-token"
         cls.server.jobs = dashboard.Jobs()
+        cls.server.live = dashboard.LiveInference(cls.server.jobs, Path(cls.temp.name))
         cls.origin = f"http://127.0.0.1:{cls.server.server_port}"
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
 
     @classmethod
     def tearDownClass(cls):
+        cls.server.live.shutdown()
         cls.server.shutdown()
         cls.server.server_close()
         cls.thread.join(timeout=5)
@@ -164,12 +211,17 @@ class DashboardHTTPTests(unittest.TestCase):
             with urlopen(request, timeout=5) as response:
                 return response.status, response.read()
         except HTTPError as error:
-            return error.code, error.read()
+            with error:
+                return error.code, error.read()
 
     def test_pages_and_results_are_served(self):
         for path in ["/", "/style.css", "/app.js", "/api/jobs"]:
             with self.subTest(path=path):
-                self.assertEqual(self.request(path)[0], 200)
+                status, body = self.request(path)
+                self.assertEqual(status, 200)
+                if path == "/":
+                    self.assertIn(b'name="video_extra_samples"', body)
+                    self.assertIn(b'name="video_time_warp"', body)
         status, body = self.request("/api/state")
         self.assertEqual(status, 200)
         result = json.loads(body)
@@ -184,6 +236,38 @@ class DashboardHTTPTests(unittest.TestCase):
         self.assertEqual(self.request("/", headers={"Host": "example.com"})[0], 403)
         self.assertEqual(self.request("/api/jobs", [], {"X-Dashboard-Token": "test-token"})[0], 400)
         self.assertEqual(self.server.jobs.snapshot(), [])
+
+    def test_live_endpoints_validate_paths_and_forward_frames(self):
+        root = Path(self.temp.name)
+        run = root / "runs" / "colors" / "live_fixture"
+        run.mkdir(parents=True, exist_ok=True)
+        (run / "best.keras").write_bytes(b"fixture")
+        (run / "preprocessing.json").write_text('{"extraction":{"model_sha256":"fixture"}}')
+        headers = {"X-Dashboard-Token": "test-token"}
+        with patch.object(self.server.live, "start", return_value={"session": "fixture"}) as start:
+            status, body = self.request('/api/live/start', {"run": "runs/colors/live_fixture", "mode": "motion"}, headers)
+            self.assertEqual(status, 200)
+            self.assertEqual(json.loads(body)["session"], "fixture")
+            start.assert_called_once_with(run, None, "motion")
+        with patch.object(self.server.live, "start", return_value={"session": "fixture"}) as start:
+            self.assertEqual(self.request('/api/live/start', {"run": "runs/colors/live_fixture", "mode": "gesture"}, headers)[0], 200)
+            start.assert_called_once_with(run, None, "gesture")
+        with patch.object(self.server.live, "frame", return_value={"status": "no_hand"}) as frame:
+            image = "data:image/jpeg;base64,fixture"
+            self.assertEqual(self.request('/api/live/frame', {"session": "fixture", "image": image, "timestamp": 50}, headers)[0], 200)
+            frame.assert_called_once_with("fixture", image, 50.)
+            for data in ({"image": "invalid", "timestamp": 50}, {"image": image, "timestamp": True}):
+                self.assertEqual(self.request('/api/live/frame', data, headers)[0], 400)
+        with patch.object(self.server.live, "stop") as stop:
+            self.assertEqual(self.request('/api/live/stop', {"session": "fixture"}, headers)[0], 200)
+            stop.assert_called_once_with("fixture")
+        with patch.object(self.server.live, "reset", return_value={"status": "waiting"}) as reset:
+            self.assertEqual(self.request('/api/live/reset', {"session": "fixture"}, headers)[0], 200)
+            reset.assert_called_once_with("fixture")
+            self.assertEqual(self.request('/api/live/reset', {}, headers)[0], 400)
+        self.assertEqual(self.request('/api/live/start', {"run": "../outside"}, headers)[0], 400)
+        self.assertEqual(self.request('/api/live/start', {"run": "runs/colors/live_fixture", "mode": "invalid"}, headers)[0], 400)
+        self.assertEqual(self.request('/api/live/start', {"run": "runs/colors/live_fixture"})[0], 403)
 
 
 if __name__ == "__main__":

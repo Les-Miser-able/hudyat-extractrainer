@@ -13,19 +13,11 @@ import tempfile
 import urllib.request
 import numpy as np
 
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
-VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".m4v"}
-SUPPORTED = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS | {".npy"}
+from .source_selection import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, SUPPORTED, source_files, folder_selection
 MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
 from ..paths import PROJECT_ROOT
 
 DEFAULT_MODEL = PROJECT_ROOT / "models" / "hand_landmarker.task"
-
-
-def source_files(folder):
-    return sorted(p for p in Path(folder).rglob("*")
-                  if p.is_file() and p.suffix.lower() in SUPPORTED
-                  and not any(part.startswith(".") for part in p.relative_to(folder).parts))
 
 
 def default_group(relative):
@@ -181,7 +173,18 @@ def prepare_media(args, prepare_landmarks):
     if output.exists() and (not output.is_dir() or any(output.iterdir())):
         raise ValueError("Output must be empty; choose a new dataset folder")
     folders = [p for p in sorted(source.iterdir()) if p.is_dir() and not p.name.startswith(".")]
-    all_files = [p for folder in folders for p in source_files(folder)]
+    selected = folder_selection(getattr(args, "source_folders", None))
+    videos_only = getattr(args, "videos_only", False)
+    filtered = selected is not None or videos_only
+    all_files = [p for folder in folders for p in source_files(folder, selected, videos_only)]
+    excluded_classes = [folder.name for folder in folders
+                        if not source_files(folder, selected, videos_only)] if filtered else []
+    if filtered:
+        folders = [folder for folder in folders if folder.name not in excluded_classes]
+        if len(folders) < 2:
+            raise ValueError("Selected sources must contain at least two populated gesture classes")
+        print(f"Selected {len(all_files)} source files. Omitted gestures with no matching files: "
+              f"{', '.join(excluded_classes) or 'none'}", flush=True)
     mapping = None
     if args.groups:
         with open(args.groups, newline="", encoding="utf-8-sig") as handle:
@@ -193,12 +196,15 @@ def prepare_media(args, prepare_landmarks):
                 raise ValueError("Group CSV contains duplicate paths or empty group IDs")
             mapping[key] = group
         if set(mapping) != {p.relative_to(source).as_posix() for p in all_files}:
-            raise ValueError("Group CSV must cover every supported raw source exactly once")
+            raise ValueError("Group CSV must cover every selected supported raw source exactly once")
     ignored = [{"source": p.relative_to(source).as_posix(), "reason": "Unsupported extension"}
                for folder in folders for p in sorted(folder.rglob("*"))
                if p.is_file() and p.suffix.lower() not in SUPPORTED
                and not any(part.startswith(".") for part in p.relative_to(source).parts)]
     report = {"source": str(source), "accepted": [], "rejected": [], "ignored": ignored, "status": "extracting"}
+    if filtered:
+        report["source_selection"] = {"folders": selected, "videos_only": videos_only,
+                                      "selected_files": len(all_files), "excluded_classes": excluded_classes}
     if ignored:
         print(f"Ignoring {len(ignored)} unsupported files; details will be in the extraction report.", flush=True)
     extractor = Extractor(model=getattr(args, "hand_model", None) or DEFAULT_MODEL,
@@ -245,6 +251,7 @@ def prepare_media(args, prepare_landmarks):
             staged_args = argparse.Namespace(**vars(args))
             staged_args.source, staged_args.groups = str(stage), str(group_path)
             staged_args._landmarks_only = True
+            staged_args.source_folders, staged_args.videos_only = None, False
             prepare_landmarks(staged_args)
             print("Restoring original source filenames and extraction settings...", flush=True)
             manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
@@ -252,6 +259,12 @@ def prepare_media(args, prepare_landmarks):
                 row["source"] = provenance[row["source"]]
                 row["variant_of"] = row["source"]
             save_json(output / "manifest.json", manifest)
+            video_report_path = output / "video_augmentation_report.json"
+            if video_report_path.is_file():
+                video_report = json.loads(video_report_path.read_text(encoding="utf-8"))
+                for item in video_report["sources"]:
+                    item["source"] = provenance[item["source"]]
+                save_json(video_report_path, video_report)
             metadata = json.loads((output / "preprocessing.json").read_text(encoding="utf-8"))
             metadata["extraction"] = {
                 "backend": "MediaPipe HandLandmarker", "mediapipe_version": extractor.mp.__version__,
@@ -263,6 +276,8 @@ def prepare_media(args, prepare_landmarks):
                 "video_timeline": "all decoded frames, constant FPS timeline; missing frames zero-filled"}
             metadata["grouping"] = "raw source CSV" if mapping else "source path with Roboflow .rf. siblings grouped"
             metadata["coordinates"] = metadata["extraction"]["normalization"]
+            if filtered:
+                metadata["source_selection"] = report["source_selection"]
             save_json(output / "preprocessing.json", metadata)
             with Stage("Copying original-length landmark files", len(provenance)) as copying:
                 def copy_landmark(source_path, target_path):

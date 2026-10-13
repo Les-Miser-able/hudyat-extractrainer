@@ -44,6 +44,77 @@ is held in memory until restart; generated artifacts remain in the usual folders
 The existing [FSL Pocket webcam app](pwa-sample/README.md) remains available
 separately. Its setup/export workflow is unchanged.
 
+**Try a prediction → Live camera prediction** uses the trained run selected above
+the camera panel. The default **Perform once** mode automatically captures one
+gesture: show your hands, perform the complete gesture, then hold the ending
+still for about a second. The result stays displayed even if you keep holding
+the ending or lower your hands. Select **Next gesture** to reset capture without
+reloading the camera or model. **Moving gesture** retains the rolling two-second
+mode, and **Held pose** classifies the current pose. Press **Start camera** and
+allow camera access. Frames are processed serially at up to five times per
+second, depending on CPU speed. **Stop camera**, leaving
+the prediction view, or hiding the tab ends capture; abandoned workers expire
+after 60 seconds without frames. Stop live prediction before running other jobs.
+
+The dashboard keeps one Python inference worker and checkpoint loaded per live
+session, using the run's extraction confidence, handedness swap, and verified hand
+model asset. The optional sample form's **Custom hand model** also applies to live
+prediction. Runs without extraction metadata support normalized `.npy` file
+prediction but cannot use the camera. No model export or browser ML dependencies
+are needed for this dashboard feature. Launch the dashboard with the Python
+environment containing `requirements.txt`.
+
+If `/api/live/start` returns 404 after updating the project, the running dashboard
+still has the previous Python code loaded. Finish any active job, stop the server,
+restart `dashboard.py` in the same Python environment, and refresh the browser.
+Refreshing the page alone updates browser files but does not reload Python routes.
+
+Camera frames travel only to the local dashboard worker and are not written to
+disk. The preview is mirrored visually; input pixels remain unmirrored. Held
+poses repeat the current landmarks to 32 frames; rolling mode interpolates the
+last two seconds using capture timestamps. Perform once interpolates the entire
+captured interval to 32 frames, retaining up to 600 ms before movement onset.
+No inference augmentation is applied. Scores below 60% show uncertainty.
+
+Automatic capture starts after two consecutive moving frames and finishes after
+800 ms of stillness or 600 ms without detected hands. Brief missing-hand frames
+stay zero-filled within the sequence. Motion uses mean XY landmark displacement
+per second (threshold 0.04 in image-normalized units); movement must accumulate
+at least 0.025 image units. These are initial heuristics, not learned gesture
+boundaries. A pause within a gesture can end capture early; camera shake can
+trigger capture. Keep the camera steady and use **Next gesture** to retry.
+Captures exceeding six seconds or the 256-frame limit are rejected without
+classifying a truncated sequence. A frame-delivery pause longer than one second
+resets an unfinished capture. Completed results remain held until reset or stop.
+
+Missing hands clear the rolling window and held-pose predictions as before.
+Webcam accuracy and automatic boundaries must be evaluated separately from the
+prepared test split; physical camera interaction has not been manually verified
+by the agent. Capture changes do not repair the saved greetings checkpoint's
+[normalization issue](docs/diagnostics/greetings-vs-colors.md).
+
+Camera API and timestamp conventions follow
+[browser camera requirements](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia)
+and [MediaPipe's Python hand-landmark guide](https://developers.google.com/edge/mediapipe/solutions/vision/hand_landmarker/python).
+
+Under **Datasets → Prepare a dataset → Source selection**, select **Choose source
+folders** and check any folders to include beneath each gesture (S1, S2, S3, S4,
+PUB, or other names found in that category). Enable **Videos only** to exclude
+images and landmark arrays. The preview updates counts per gesture; gestures
+with no matching files are omitted when a filter is active. All source folders
+and supported file types remain the default. Selected subfolders are searched
+recursively; files directly inside a gesture are included only in All source
+folders mode. Selection leaves original files untouched and is recorded in
+preprocessing settings, plus the extraction report for raw media. A Group CSV must cover exactly the
+selected supported sources; folder selection itself does not assign signer or
+session groups. Choose a fresh dataset root for this preparation.
+
+The equivalent CLI options can be repeated for any folder names:
+
+```powershell
+python categories.py prepare --category colors --datasets datasets_colors_selected --source-folder S1 --source-folder S2 --source-folder S3 --videos-only
+```
+
 Dashboard checks (no ML dependencies needed):
 `python -m unittest discover -s tests/dashboard -v` and
 `node --test tests/dashboard/ui.test.cjs`.
@@ -334,3 +405,44 @@ For a completed run, generate the plots without retraining:
 ```powershell
 python confusion_matrix.py --run runs/alphabet/optimized
 ```
+
+## Video and sequence augmentation
+
+Preparation can create extra timing variations from videos and pre-extracted
+multi-frame `.npy` landmarks. It is disabled by default. Enable it with:
+
+```powershell
+python categories.py prepare --category alphabet --datasets datasets_video_v1 --video-extra-samples 3 --video-time-warp 0.05
+python trainer.py inspect --dataset datasets_video_v1/alphabet
+python categories.py train --category alphabet --datasets datasets_video_v1 --run video_augmented_v1
+```
+
+`--video-extra-samples` accepts integers 0–1000; zero disables the feature.
+Three requests up to three extras per eligible training source, alongside the
+original sample. Validation/test videos and existing static-image augmentation
+keep their current behavior. All descendants remain in their source group's
+split and retain their gesture label.
+
+`--video-time-warp` defaults to 0.05 and accepts finite values greater than
+zero through 0.10. It bounds the timing shift to 5% of the normalized clip
+timeline by default, while retaining endpoints and movement order. The transform
+changes timing within the gesture, with no rotation, mirroring, noise, or new
+video files. Prepared samples remain `(32,128)`.
+
+The dashboard exposes Extra samples and Timing strength under dataset
+preparation. Set Extra samples to 3 to start; the existing Random seed controls
+repeatability. Activity shows actual generated totals and shortfalls. Motionless
+or sparsely detected sources may yield fewer valid, distinct samples than
+requested; originals are retained and duplicates are skipped.
+
+Enabled datasets save `video_augmentation_report.json` with source-level
+requests, actual counts, skipped candidates, and shortfall reasons. The manifest
+records each generated sample's time map; `preprocessing.json` records the
+version and settings. `augmentation_summary.json` separates generated
+sequence samples from static variants. Training copies the augmentation report
+into its run folder. Prediction continues to use ordinary preprocessing.
+
+Choose a fresh dataset output. The existing resume command requires exactly
+matching preprocessing metadata; changing augmentation settings therefore calls
+for a fresh training run. The initial timing limits are settings to evaluate,
+not a recognition-accuracy claim. See the [agreed design](docs/design/video-augmentation.md).

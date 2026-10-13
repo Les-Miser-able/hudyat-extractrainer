@@ -16,11 +16,12 @@ import threading
 from urllib.parse import parse_qs, unquote, urlparse
 
 from ..paths import PROJECT_ROOT
+from ..data.augmentation_options import extra_samples, time_warp
+from ..data.source_selection import SUPPORTED, VIDEO_EXTENSIONS, source_files, folder_selection
+from .live import LiveInference
 
 BASE = PROJECT_ROOT
 UI = Path(__file__).resolve().parent / "ui"
-SUPPORTED = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff",
-             ".mp4", ".avi", ".mov", ".mkv", ".webm", ".m4v", ".npy"}
 
 
 def local_path(value, root=None):
@@ -74,14 +75,20 @@ def directories(root):
                   and BASE in p.resolve().parents)
 
 
-def source_classes(source):
+def source_classes(source, source_folders=None, videos_only=False):
     classes = []
     for folder in directories(source):
-        count = sum(1 for p in folder.rglob("*") if p.is_file()
-                    and p.suffix.lower() in SUPPORTED
-                    and not any(part.startswith(".") for part in p.relative_to(folder).parts)
-                    and BASE in p.resolve().parents)
-        classes.append({"name": folder.name, "samples": count})
+        files = [p for p in source_files(folder, source_folders, videos_only)
+                 if BASE in p.resolve().parents]
+        subfolders = {}
+        for subfolder in directories(folder):
+            members = [p for p in files if p.relative_to(folder).parts[0] == subfolder.name
+                       and len(p.relative_to(folder).parts) > 1]
+            subfolders[subfolder.name] = {"samples": len(members),
+                                         "videos": sum(p.suffix.lower() in VIDEO_EXTENSIONS for p in members)}
+        classes.append({"name": folder.name, "samples": len(files),
+                        "videos": sum(p.suffix.lower() in VIDEO_EXTENSIONS for p in files),
+                        "folders": subfolders})
     return classes
 
 
@@ -142,6 +149,12 @@ def build_command(data):
         datasets = local_path(data.get("datasets", "datasets_augmented"))
         dataset = local_path(category, datasets)
     if action == "prepare":
+        selected = folder_selection(data.get("source_folders"))
+        videos_only = data.get("videos_only", False)
+        if not isinstance(videos_only, bool):
+            raise ValueError("videos_only must be a boolean.")
+        video_count = extra_samples(data.get("video_extra_samples", 0))
+        video_strength = time_warp(data.get("video_time_warp", .05))
         source = local_path(category, local_path(data.get("data", "data")))
         if not source.is_dir():
             raise ValueError("This category has no source folder.")
@@ -153,7 +166,10 @@ def build_command(data):
         test = number(data, "test", .15, .001, .99)
         if validation + test >= 1:
             raise ValueError("Validation and test fractions must sum to less than 1.")
-        issue = preparation_issue(source, source_classes(source))
+        classes = source_classes(source, selected, videos_only)
+        if selected is not None or videos_only:
+            classes = [row for row in classes if row["samples"]]
+        issue = preparation_issue(source, classes)
         if issue:
             raise ValueError(issue)
         command += ["prepare", "--source", str(source), "--output", str(dataset),
@@ -161,6 +177,13 @@ def build_command(data):
                     "--static-variants", str(number(data, "variants", 8, 1, 1000, True)),
                     "--jitter", str(number(data, "jitter", .0075, 0, 1)),
                     "--detection-confidence", str(number(data, "confidence", .5, 0, 1))]
+        if video_count:
+            command += ["--video-extra-samples", str(video_count),
+                        "--video-time-warp", str(video_strength)]
+        for name in selected or []:
+            command += ["--source-folder", name]
+        if videos_only:
+            command += ["--videos-only"]
         if data.get("swap_hands") is True:
             command += ["--swap-hands"]
         if data.get("groups"):
@@ -209,9 +232,12 @@ class Jobs:
         self.lock = threading.Lock()
         self.items = deque(maxlen=30)
         self.process = None
+        self.live_active = False
 
     def start(self, data):
         with self.lock:
+            if self.live_active:
+                raise ValueError("Stop live camera prediction before starting a job.")
             if self.process and self.process.poll() is None:
                 raise ValueError("A job is already running. Wait or stop it first.")
             command = build_command(data)
@@ -322,11 +348,40 @@ class Handler(BaseHTTPRequestHandler):
                                          f"http://127.0.0.1:{self.server.server_port}"}:
                 return self.reply({"error": "Invalid origin."}, 403)
             size = int(self.headers.get("Content-Length", "0"))
-            if not 0 < size <= 16384:
+            limit = 1_000_000 if self.path == "/api/live/frame" else 16384
+            if not 0 < size <= limit:
                 raise ValueError("Invalid request size.")
             data = json.loads(self.rfile.read(size))
             if not isinstance(data, dict):
                 raise ValueError("Expected a JSON object.")
+            if self.path == "/api/live/start":
+                run = local_path(data.get("run"))
+                if BASE / "runs" not in run.parents or not (run / "best.keras").is_file():
+                    raise ValueError("Select a run with a trained checkpoint.")
+                if not read_json(run / "preprocessing.json", {}).get("extraction"):
+                    raise ValueError("This run has no camera extraction settings; use normalized .npy input.")
+                mode = data.get("mode", "motion")
+                if mode not in ("pose", "motion", "gesture"):
+                    raise ValueError("Choose Perform once, held pose, or moving gesture mode.")
+                model = local_path(data["hand_model"]) if data.get("hand_model") else None
+                if model and (not model.is_file() or model.suffix != ".task"):
+                    raise ValueError("Choose an existing .task hand model.")
+                return self.reply(self.server.live.start(run, model, mode))
+            if self.path == "/api/live/frame":
+                image = data.get("image")
+                if not isinstance(image, str) or not image.startswith("data:image/jpeg;base64,") or len(image) > 900_000:
+                    raise ValueError("Send a JPEG camera frame smaller than 900 KB.")
+                timestamp = number(data, "timestamp", None, 0, 2**53)
+                return self.reply(self.server.live.frame(data.get("session"), image, timestamp))
+            if self.path == "/api/live/stop":
+                if not isinstance(data.get("session"), str) or not data["session"]:
+                    raise ValueError("Specify the live session to stop.")
+                self.server.live.stop(data["session"])
+                return self.reply({"ok": True})
+            if self.path == "/api/live/reset":
+                if not isinstance(data.get("session"), str) or not data["session"]:
+                    raise ValueError("Specify the live session to reset.")
+                return self.reply(self.server.live.reset(data['session']))
             if self.path == "/api/jobs":
                 return self.reply({"id": self.server.jobs.start(data)}, 201)
             if self.path == "/api/cancel":
@@ -348,6 +403,7 @@ def main():
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     server.token = secrets.token_hex(32)
     server.jobs = Jobs()
+    server.live = LiveInference(server.jobs, BASE)
     print(f"FSL Studio: http://localhost:{server.server_port}", flush=True)
     print(f"Worker Python: {sys.executable}\nPress Ctrl+C to stop.", flush=True)
     try:
@@ -355,6 +411,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        server.live.shutdown()
         server.jobs.shutdown()
         server.server_close()
 

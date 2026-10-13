@@ -6,6 +6,9 @@ const percent = value => typeof value === 'number' && Number.isFinite(value) ? `
 const title = value => value.charAt(0).toUpperCase() + value.slice(1).replaceAll('_', ' ');
 let state = {categories: [], runs: []}, jobs = [], token = '', selectedRun = '', polling = false, loading = false, submitting = false;
 let scanVersion = 0, runVersion = 0, previousJobStatus = '';
+let folderCategory = '';
+let liveStream = null, liveSession = '', liveActive = false, liveVersion = 0, liveTimer = null;
+let liveCaptureVersion = 0, liveResetting = false;
 
 function notice(message, error = false) {
   $('notice').textContent = message;
@@ -17,6 +20,9 @@ async function api(path, body) {
     method: 'POST', headers: {'Content-Type': 'application/json', 'X-Dashboard-Token': token}, body: JSON.stringify(body)
   });
   const result = await response.json();
+  if (response.status === 404 && path.startsWith('/api/live/')) {
+    throw new Error('Live prediction is unavailable in the running server. Finish any running job, restart dashboard.py, then refresh this page.');
+  }
   if (!response.ok) throw new Error(result.error || `Request failed (${response.status}).`);
   return result;
 }
@@ -31,6 +37,7 @@ function route() {
   });
   $('breadcrumb').textContent = names[view];
   document.title = `${names[view]} · FSL Studio`;
+  if (view !== 'predict' && liveActive) stopLive();
 }
 function stat(label, value, note, icon) {
   return `<article class="stat"><div class="stat-top">${label}<span class="stat-icon" aria-hidden="true">${icon}</span></div><strong>${value}</strong><small>${note}</small></article>`;
@@ -57,7 +64,27 @@ function render() {
   $('environment').textContent = `Python ${state.python} · Local processing`;
   $('training-source').textContent = `Prepared datasets: ${$('dataset-root').value}/<category> · Output: runs/<category>/<run name>`;
   $('recent-runs').innerHTML = runTable(state.runs.slice(0, 4));
-  renderDatasets(); renderRuns(); controls();
+  renderSourceFolders(); renderDatasets(); renderRuns(); controls();
+}
+function sourceSelection() {
+  return {source_folders: $('source-folder-mode').value === 'selected'
+    ? [...$('source-folder-options').querySelectorAll('input:checked')].map(input => input.value) : null,
+    videos_only: $('source-videos-only').checked === true};
+}
+function renderSourceFolders() {
+  const category = $('prepare-form').elements.category.value;
+  const classes = state.categories.find(c => c.name === category)?.classes || [];
+  const previous = folderCategory === category
+    ? new Map([...$('source-folder-options').querySelectorAll('input')].map(input => [input.value, input.checked])) : new Map();
+  folderCategory = category;
+  const names = [...new Set(classes.flatMap(c => Object.keys(c.folders || {})))].sort();
+  $('source-folder-options').innerHTML = names.map(name => `<label class="checkbox"><input type="checkbox" value="${escapeHTML(name)}" ${previous.get(name) !== false ? 'checked' : ''}> ${escapeHTML(name)}</label>`).join('') || '<span class="hint">No subfolders found beneath the gesture folders.</span>';
+}
+function selectedClasses(category) {
+  const selection = sourceSelection();
+  return (category?.classes || []).map(c => ({name: c.name, samples: selection.source_folders === null
+    ? (selection.videos_only ? c.videos : c.samples)
+    : selection.source_folders.reduce((sum, name) => sum + (c.folders?.[name]?.[selection.videos_only ? 'videos' : 'samples'] || 0), 0)}));
 }
 function runTable(rows) {
   if (!rows.length) return empty('No runs here yet. Prepare a dataset and start your first training run.');
@@ -85,9 +112,27 @@ async function scan() {
 }
 function controls() {
   const active = jobs.some(j => j.status === 'running');
-  document.querySelectorAll('.submit-job').forEach(b => { b.disabled = loading || submitting || active || !token; });
+  document.querySelectorAll('.submit-job').forEach(b => { b.disabled = loading || submitting || active || liveActive || !token; });
+  $('live-start').disabled = loading || submitting || active || liveActive || !token || !$('predict-run').value;
+  $('live-stop').disabled = !liveActive;
+  $('predict-run').disabled = liveActive;
+  $('live-mode').disabled = liveActive;
+  $('live-next').hidden = $('live-mode').value !== 'gesture';
+  $('live-next').disabled = !liveActive || !liveSession || liveResetting;
   const category = state.categories.find(c => c.name === $('prepare-form').elements.category.value);
-  const issue = category?.preparation_issue || (!category ? 'Select a category with source samples to prepare a dataset.' : '');
+  const selection = sourceSelection();
+  const filtered = selection.source_folders !== null || selection.videos_only;
+  const classes = selectedClasses(category);
+  const included = classes.filter(c => c.samples > 0), omitted = classes.filter(c => !c.samples);
+  $('source-folder-options').hidden = selection.source_folders === null;
+  $('source-selection-preview').textContent = category
+    ? `${fmt(included.reduce((sum, c) => sum + c.samples, 0))} matching ${selection.videos_only ? 'videos' : 'source files'}. ${included.map(c => `${c.name}: ${fmt(c.samples)}`).join(' · ')}${filtered && omitted.length ? `. Omitted gestures: ${omitted.map(c => c.name).join(', ')}.` : ''}`
+    : 'Select a category to preview source counts.';
+  const issue = !category ? 'Select a category with source samples to prepare a dataset.'
+    : filtered ? (selection.source_folders?.length === 0 ? 'Choose at least one source folder.'
+      : included.length < 2 ? 'Selected sources need at least two populated gesture classes.'
+      : included.some(c => c.samples < 3) ? 'Each included gesture needs at least three independent source files.' : '')
+    : category.preparation_issue || '';
   $('prepare-readiness').textContent = loading ? 'Checking project folders…' : active
     ? 'Another job is running. Wait for it to finish or stop it in Activity.'
     : issue ? `${issue} If you have added files since the last scan, click Prepare dataset to check again.`
@@ -101,7 +146,8 @@ async function startJob(data) {
   submitting = true; controls(); notice('');
   if (data.action === 'prepare') $('prepare-error').hidden = true;
   try {
-    await api('/api/jobs', {data: $('data-root').value, datasets: $('dataset-root').value, ...data});
+    await api('/api/jobs', {data: $('data-root').value, datasets: $('dataset-root').value, ...data,
+      ...(data.action === 'prepare' ? sourceSelection() : {})});
     $('job-select').value = '';
     await pollJobs();
     $('jobs-panel').scrollIntoView({behavior: 'smooth', block: 'nearest'});
@@ -139,6 +185,114 @@ function renderJob() {
         $('prediction-result').innerHTML = `<div class="prediction-main">${escapeHTML(label)}</div><div class="prediction-confidence">${percent(confidence)} model confidence · ${escapeHTML(prediction.started.replace('T', ' '))}</div>${ranked.slice(0, 5).map(([name, score]) => `<div class="prediction-row"><span>${escapeHTML(name)}</span><meter min="0" max="1" value="${score}" aria-label="${escapeHTML(name)} confidence"></meter><span>${percent(score)}</span></div>`).join('')}<p class="hint">Model scores can be wrong. Verify the sign before relying on a prediction.</p>`;
       }
     } catch { /* Non-JSON worker output is still available in the activity log. */ }
+  }
+}
+function showLiveResult(result) {
+  $('live-status').textContent = result.message || 'Live prediction running.';
+  if (result.status !== 'prediction') {
+    if (!result.keep_result) $('live-result').replaceChildren();
+    return;
+  }
+  const ranked = Object.entries(result.probabilities).sort((a, b) => b[1] - a[1]);
+  if (!ranked.length) return;
+  const [label, confidence] = ranked[0];
+  $('live-result').innerHTML = `<div class="prediction-main">${escapeHTML(label)}</div><div class="prediction-confidence">${percent(confidence)} model confidence${confidence < .6 ? ' · Uncertain' : ''}</div>${ranked.slice(0, 5).map(([name, score]) => `<div class="prediction-row"><span>${escapeHTML(name)}</span><meter min="0" max="1" value="${score}"></meter><span>${percent(score)}</span></div>`).join('')}`;
+}
+async function liveFrame(version) {
+  if (version !== liveVersion || !liveSession) return;
+  if (liveResetting) {
+    liveTimer = setTimeout(() => liveFrame(version), 200);
+    return;
+  }
+  const captureVersion = liveCaptureVersion;
+  try {
+    const video = $('live-video'), canvas = $('live-canvas');
+    if (!video.videoWidth || video.readyState < 2) {
+      liveTimer = setTimeout(() => liveFrame(version), 200);
+      return;
+    }
+    const scale = Math.min(1, 640 / video.videoWidth, 480 / video.videoHeight);
+    canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+    canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+    const result = await api('/api/live/frame', {session: liveSession,
+      image: canvas.toDataURL('image/jpeg', .8), timestamp: performance.now()});
+    if (version !== liveVersion) return;
+    if (captureVersion === liveCaptureVersion) showLiveResult(result);
+    liveTimer = setTimeout(() => liveFrame(version), 200);
+  } catch (error) {
+    if (version !== liveVersion) return;
+    await stopLive();
+    $('live-status').textContent = error.message;
+  }
+}
+async function startLive() {
+  if (liveActive) return;
+  const version = ++liveVersion;
+  liveActive = true; controls();
+  $('live-result').replaceChildren();
+  $('live-status').textContent = 'Requesting camera access…';
+  try {
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error('Camera access requires localhost or HTTPS and a supported browser.');
+    const stream = await navigator.mediaDevices.getUserMedia({video: {width: {ideal: 640}, height: {ideal: 480}}, audio: false});
+    if (version !== liveVersion) { stream.getTracks().forEach(track => track.stop()); return; }
+    liveStream = stream;
+    $('live-video').srcObject = stream;
+    stream.getVideoTracks().forEach(track => track.addEventListener('ended', () => { if (version === liveVersion) stopLive(); }));
+    await $('live-video').play();
+    if (version !== liveVersion) return;
+    $('live-status').textContent = 'Loading model and hand detector. The first start can take a moment…';
+    const ready = await api('/api/live/start', {run: $('predict-run').value, mode: $('live-mode').value,
+      hand_model: $('predict-form').elements.hand_model.value});
+    if (version !== liveVersion) {
+      await api('/api/live/stop', {session: ready.session});
+      return;
+    }
+    liveSession = ready.session;
+    controls();
+    $('live-status').textContent = 'Camera ready. Show your sign.';
+    await liveFrame(version);
+  } catch (error) {
+    if (version !== liveVersion) return;
+    await stopLive();
+    $('live-status').textContent = error.name === 'NotAllowedError' ? 'Camera permission was denied. Allow camera access, then try again.' : error.message;
+  }
+}
+async function stopLive() {
+  ++liveVersion;
+  ++liveCaptureVersion;
+  liveResetting = false;
+  clearTimeout(liveTimer);
+  const session = liveSession;
+  liveSession = ''; liveActive = false;
+  if (liveStream) liveStream.getTracks().forEach(track => track.stop());
+  liveStream = null;
+  $('live-video').srcObject = null;
+  $('live-result').replaceChildren();
+  $('live-status').textContent = 'Camera stopped.';
+  controls();
+  if (session) {
+    try { await api('/api/live/stop', {session}); }
+    catch (error) { $('live-status').textContent = `Camera stopped. ${error.message} The idle worker will expire automatically.`; }
+  }
+}
+async function nextGesture() {
+  if (!liveSession || liveResetting) return;
+  const version = liveVersion;
+  ++liveCaptureVersion;
+  liveResetting = true; controls();
+  $('live-result').replaceChildren();
+  $('live-status').textContent = 'Preparing for the next gesture…';
+  try {
+    const result = await api('/api/live/reset', {session: liveSession});
+    if (version === liveVersion) showLiveResult(result);
+  } catch (error) {
+    if (version === liveVersion) {
+      await stopLive();
+      $('live-status').textContent = error.message;
+    }
+  } finally {
+    if (version === liveVersion) { liveResetting = false; controls(); }
   }
 }
 async function pollJobs() {
@@ -203,14 +357,17 @@ document.addEventListener('click', event => {
   const run = event.target.closest('[data-run]');
   if (run) openRun(run.dataset.run);
   const prepare = event.target.closest('[data-prepare]');
-  if (prepare) { $('prepare-form').elements.category.value = prepare.dataset.prepare; controls(); $('prepare-form').scrollIntoView({behavior: 'smooth', block: 'center'}); }
+  if (prepare) { $('prepare-form').elements.category.value = prepare.dataset.prepare; renderSourceFolders(); controls(); $('prepare-form').scrollIntoView({behavior: 'smooth', block: 'center'}); }
   const inspect = event.target.closest('[data-inspect]');
   if (inspect) startJob({action: 'inspect', category: inspect.dataset.inspect});
 });
 $('refresh').addEventListener('click', () => { notice(''); scan(); pollJobs(); });
 $('scan-folders').addEventListener('click', () => { notice(''); scan(); });
 $('category-search').addEventListener('input', renderDatasets);
-$('prepare-form').elements.category.addEventListener('change', () => { $('prepare-error').hidden = true; controls(); });
+$('prepare-form').elements.category.addEventListener('change', () => { $('prepare-error').hidden = true; renderSourceFolders(); controls(); });
+$('source-folder-mode').addEventListener('change', controls);
+$('source-folder-options').addEventListener('change', controls);
+$('source-videos-only').addEventListener('change', controls);
 $('run-filter').addEventListener('change', renderRuns);
 $('job-select').addEventListener('change', renderJob);
 $('cancel-job').addEventListener('click', async () => {
@@ -220,6 +377,18 @@ $('cancel-job').addEventListener('click', async () => {
   finally { $('cancel-job').disabled = false; }
 });
 $('use-run').addEventListener('click', () => { $('predict-run').value = selectedRun; location.hash = 'predict'; });
+$('predict-run').addEventListener('change', controls);
+$('live-start').addEventListener('click', startLive);
+$('live-stop').addEventListener('click', stopLive);
+$('live-mode').addEventListener('change', controls);
+$('live-next').addEventListener('click', nextGesture);
+window.addEventListener('pagehide', () => {
+  const session = liveSession;
+  stopLive();
+  if (session) fetch('/api/live/stop', {method: 'POST', keepalive: true,
+    headers: {'Content-Type': 'application/json', 'X-Dashboard-Token': token}, body: JSON.stringify({session})}).catch(() => {});
+});
+document.addEventListener('visibilitychange', () => { if (document.hidden && liveActive) stopLive(); });
 window.addEventListener('hashchange', route);
 $('run-name').value = `run-${new Date().toISOString().replace(/[-:]/g, '').slice(0, 15).replace('T', '-')}`;
 route();

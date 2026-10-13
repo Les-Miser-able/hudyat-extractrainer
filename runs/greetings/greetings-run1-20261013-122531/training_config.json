@@ -1,0 +1,54 @@
+{
+  "command": "train",
+  "dataset": "C:\\Users\\Russel\\Desktop\\trainer\\datasets_augmented\\greetings",
+  "output": "C:\\Users\\Russel\\Desktop\\trainer\\runs\\greetings\\greetings-run1-20261013-122531",
+  "epochs": 100,
+  "batch_size": 32,
+  "learning_rate": 0.001,
+  "patience": 12,
+  "seed": 42,
+  "class_weights": false,
+  "loader": "packed",
+  "resume_from": null,
+  "tensorflow_version": "2.21.0",
+  "split_counts": {
+    "test": {
+      "good_afternoon": 7,
+      "good_evening": 7,
+      "good_morning": 7,
+      "hello": 7,
+      "how_are_you": 7,
+      "im_fine": 7,
+      "nice_to_meet_you": 7,
+      "see_you_tomorrow": 7,
+      "thank_you": 7,
+      "youre_welcome": 7
+    },
+    "train": {
+      "good_afternoon": 31,
+      "good_evening": 31,
+      "good_morning": 31,
+      "hello": 31,
+      "how_are_you": 31,
+      "im_fine": 31,
+      "nice_to_meet_you": 30,
+      "see_you_tomorrow": 31,
+      "thank_you": 31,
+      "youre_welcome": 32
+    },
+    "validation": {
+      "good_afternoon": 7,
+      "good_evening": 7,
+      "good_morning": 7,
+      "hello": 7,
+      "how_are_you": 7,
+      "im_fine": 7,
+      "nice_to_meet_you": 7,
+      "see_you_tomorrow": 7,
+      "thank_you": 7,
+      "youre_welcome": 7
+    }
+  },
+  "actual_optimizer_learning_rate": 0.0010000000474974513,
+  "data_loader": "packed"
+}

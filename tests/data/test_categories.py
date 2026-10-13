@@ -82,6 +82,23 @@ class CategoryTests(unittest.TestCase):
             with self.assertRaises(argparse.ArgumentTypeError):
                 c.category_name(value)
 
+    def test_selected_folders_are_forwarded_after_the_prepare_subcommand(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self.source(root, "colors")
+            folder = root / "data" / "colors" / "gesture" / "S4"
+            folder.mkdir()
+            (folder / "clip.mp4").touch()
+            args = self.options(root, category=["colors"], source_folders=["S4"], videos_only=True)
+            jobs, _ = c.build_jobs(args)
+            command = jobs[0][2]
+            self.assertLess(command.index("prepare"), command.index("--source-folder"))
+            self.assertEqual(command[command.index("--source-folder") + 1], "S4")
+            self.assertIn("--videos-only", command)
+            args.source_folders = ["missing"]
+            with self.assertRaisesRegex(ValueError, "no images, videos or landmark samples"):
+                c.build_jobs(args)
+
 
 if __name__ == "__main__":
     unittest.main()

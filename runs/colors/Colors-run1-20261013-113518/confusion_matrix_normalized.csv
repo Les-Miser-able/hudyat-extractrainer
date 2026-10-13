@@ -1,0 +1,5 @@
+Actual / Predicted,blue,green,orange,red
+blue,100.0,0.0,0.0,0.0
+green,0.0,100.0,0.0,0.0
+orange,0.0,0.0,100.0,0.0
+red,0.0,0.0,0.0,100.0

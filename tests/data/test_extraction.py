@@ -68,6 +68,8 @@ class ExtractionTests(unittest.TestCase):
                     x = np.zeros((frames, 128), dtype=np.float32)
                     x[:, :63] = int(path.read_text()) * 0.1
                     x[:, 126] = 1
+                    if frames > 1:
+                        x[:, 0] += np.linspace(0, .05, frames)
                     return x, {"kind": "image" if frames == 1 else "video",
                                "frames": frames, "detected_frames": frames}
                 def close(self):
@@ -88,6 +90,22 @@ class ExtractionTests(unittest.TestCase):
             self.assertEqual(report["rejected"][0]["source"], "A/bad.jpg")
             self.assertTrue((root/"out"/"extracted_sources.json").is_file())
             self.assertEqual(len(list((root/"out"/"extracted").glob("*/*.npy"))), 7)
+            args.output = str(root / "augmented")
+            args.video_extra_samples, args.video_time_warp = 3, .05
+            with patch("extraction.Extractor", FakeExtractor), contextlib.redirect_stdout(io.StringIO()):
+                t.prepare(args)
+            augmented, _, _ = t.inspect_dataset(root / "augmented")
+            self.assertEqual(len(augmented), 38)
+            video_report = json.loads((root / "augmented" / "video_augmentation_report.json").read_text())
+            self.assertEqual(video_report["generated_extra_samples"], 3)
+            self.assertTrue(all(r["source"] in {"J/one.mp4", "J/two.mp4", "J/three.mp4"}
+                                for r in video_report["sources"]))
+            for row in augmented:
+                self.assertIn(row["source"], {r["source"] for r in manifest})
+                self.assertEqual(row["variant_of"], row["source"])
+            for file in (root / "out" / "extracted").glob("*/*.npy"):
+                np.testing.assert_array_equal(np.load(file), np.load(root / "augmented" / "extracted" / file.relative_to(root / "out" / "extracted")))
+
 
 
 if __name__ == "__main__":

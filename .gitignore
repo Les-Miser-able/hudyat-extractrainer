@@ -12,6 +12,7 @@ __pycache__/
 !/runs/*/*/classes.json
 !/runs/*/*/preprocessing.json
 !/runs/*/*/training_config.json
+!/runs/*/*/video_augmentation_report.json
 !/runs/*/*/model_summary.txt
 !/runs/*/*/test_metrics.json
 !/runs/*/*/history.json

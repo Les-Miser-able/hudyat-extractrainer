@@ -1,9 +1,7 @@
 # Video augmentation design
 
-Status: agreed. The user confirmed the design after clarification that three
-timing variations mean up to three additional landmark samples per eligible
-training source, alongside its original prepared sample. Ready for implementation;
-feature implementation has not started.
+Status: implemented and verified. The feature follows the confirmed scope and
+contract below. Verification results are recorded in [VALIDATION.md](../VALIDATION.md).
 
 ## Goal
 
@@ -60,8 +58,9 @@ Sources: [media extraction](../../fsl_trainer/data/extraction.py),
 
 The user confirmed shared understanding of the complete design. The scope,
 implementation contract, compatibility details, and acceptance checks below
-are agreed. This confirmation covers the design only. No feature code has
-been changed.
+are agreed. Implementation was subsequently authorized through the implement
+skill. The implementation passed both review axes; see the
+[review record](video-augmentation-review.md).
 
 Terminology: [project glossary](../../GLOSSARY.md).
 
