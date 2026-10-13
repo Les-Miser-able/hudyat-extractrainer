@@ -27,9 +27,13 @@ class LiveInference:
 
     def start(self, run, hand_model, mode):
         with self.lock:
+            if self.closed.is_set():
+                raise ValueError("The dashboard is closing.")
             if self.session:
                 raise ValueError("Live prediction is already active. Stop it before starting again.")
             with self.jobs.lock:
+                if self.jobs.closed:
+                    raise ValueError("The dashboard is closing.")
                 if self.jobs.process and self.jobs.process.poll() is None:
                     raise ValueError("A job is running. Wait or stop it before using the camera.")
                 self.jobs.live_active = True
@@ -66,6 +70,8 @@ class LiveInference:
 
                 threading.Thread(target=diagnostics, daemon=True).start()
                 threading.Thread(target=collect, daemon=True).start()
+                if self.closed.is_set():
+                    raise ValueError("The dashboard is closing.")
                 self.receive(120)
                 self.session = secrets.token_hex(16)
                 self.last_frame = time.monotonic()
@@ -127,4 +133,8 @@ class LiveInference:
 
     def shutdown(self):
         self.closed.set()
+        # Interrupt a pending startup/frame response before waiting for its lock.
+        process = self.process
+        if process and process.poll() is None:
+            process.terminate()
         self.stop()

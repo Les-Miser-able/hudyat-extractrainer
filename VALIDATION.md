@@ -1,5 +1,25 @@
 # Verification
 
+## Desktop dashboard verification — 2026-10-14
+
+- All 28 dashboard Python tests passed on Windows with Python 3.13.13, including
+  desktop launch/exit, browser mode without desktop dependencies, startup failures,
+  occupied ports, close cancellation/confirmation, bounded worker termination,
+  partial-output preservation, and shutdown during a pending camera response.
+- All 12 dashboard JavaScript tests passed. Reproduce with
+  `python -m unittest discover -s tests/dashboard -v` and
+  `node --test tests/dashboard/ui.test.cjs`.
+- A native pywebview 6.2.1 / WebView2 smoke check opened the real desktop window
+  against disposable project data, navigated all five views, resized the window,
+  started a lightweight subprocess through the local job API, and verified its
+  logs appeared in the UI. The captured WebView2 rendering was visually inspected.
+  The window then closed and its server thread exited.
+- The embedded page exposes the camera API in a secure local context. Physical
+  camera capture, camera permissions, and full preparation/training/prediction
+  were not exercised in this desktop check; the isolated verification environment
+  contains desktop dependencies only. Existing ML verification below predates
+  this desktop change.
+
 ## Portable layout verification — 2026-10-06
 
 - All 24 Python tests passed with no skips. The original 22 tests also passed before restructuring.
