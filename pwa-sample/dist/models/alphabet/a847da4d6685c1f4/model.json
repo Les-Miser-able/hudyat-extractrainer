@@ -1,0 +1,310 @@
+{
+  "format": "fsl-conv1d-bilstm-v1",
+  "category": "alphabet",
+  "version": "a847da4d6685c1f4",
+  "inputShape": [
+    32,
+    128
+  ],
+  "classes": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G",
+    "H",
+    "I",
+    "J",
+    "K",
+    "L",
+    "M",
+    "N",
+    "O",
+    "P",
+    "Q",
+    "R",
+    "S",
+    "T",
+    "U",
+    "V",
+    "W",
+    "X",
+    "Y",
+    "Z"
+  ],
+  "preprocessing": {
+    "frames": 32,
+    "features": 128,
+    "layout": [
+      "left_xyz_landmarks_0_to_20",
+      "right_xyz_landmarks_0_to_20",
+      "left_present",
+      "right_present"
+    ],
+    "coordinates": "MediaPipe image landmarks: x/width, y/height, wrist-relative z at x scale",
+    "interpolation": "linear coordinates, nearest binary flags, absent coordinates zeroed",
+    "seed": 42,
+    "validation_fraction": 0.15,
+    "test_fraction": 0.15,
+    "static_variants": 8,
+    "jitter_std": 0.0075,
+    "static_method": "repeat + independent per-timestep Gaussian coordinate noise",
+    "grouping": "source path with Roboflow .rf. siblings grouped",
+    "extraction": {
+      "backend": "MediaPipe HandLandmarker",
+      "mediapipe_version": "1.0.1",
+      "model_sha256": "fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1",
+      "model_url": "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+      "num_hands": 2,
+      "detection_confidence": 0.5,
+      "swap_hands": false,
+      "normalization": "MediaPipe image landmarks: x/width, y/height, wrist-relative z at x scale",
+      "image_orientation": "EXIF transpose; no horizontal flip",
+      "video_timeline": "all decoded frames, constant FPS timeline; missing frames zero-filled"
+    }
+  },
+  "weights": [
+    {
+      "shape": [
+        3,
+        128,
+        64
+      ],
+      "dtype": "float32",
+      "offset": 0,
+      "bytes": 98304
+    },
+    {
+      "shape": [
+        64
+      ],
+      "dtype": "float32",
+      "offset": 98304,
+      "bytes": 256
+    },
+    {
+      "shape": [
+        64
+      ],
+      "dtype": "float32",
+      "offset": 98560,
+      "bytes": 256
+    },
+    {
+      "shape": [
+        64
+      ],
+      "dtype": "float32",
+      "offset": 98816,
+      "bytes": 256
+    },
+    {
+      "shape": [
+        64
+      ],
+      "dtype": "float32",
+      "offset": 99072,
+      "bytes": 256
+    },
+    {
+      "shape": [
+        64
+      ],
+      "dtype": "float32",
+      "offset": 99328,
+      "bytes": 256
+    },
+    {
+      "shape": [
+        3,
+        64,
+        128
+      ],
+      "dtype": "float32",
+      "offset": 99584,
+      "bytes": 98304
+    },
+    {
+      "shape": [
+        128
+      ],
+      "dtype": "float32",
+      "offset": 197888,
+      "bytes": 512
+    },
+    {
+      "shape": [
+        128
+      ],
+      "dtype": "float32",
+      "offset": 198400,
+      "bytes": 512
+    },
+    {
+      "shape": [
+        128
+      ],
+      "dtype": "float32",
+      "offset": 198912,
+      "bytes": 512
+    },
+    {
+      "shape": [
+        128
+      ],
+      "dtype": "float32",
+      "offset": 199424,
+      "bytes": 512
+    },
+    {
+      "shape": [
+        128
+      ],
+      "dtype": "float32",
+      "offset": 199936,
+      "bytes": 512
+    },
+    {
+      "shape": [
+        128,
+        512
+      ],
+      "dtype": "float32",
+      "offset": 200448,
+      "bytes": 262144
+    },
+    {
+      "shape": [
+        128,
+        512
+      ],
+      "dtype": "float32",
+      "offset": 462592,
+      "bytes": 262144
+    },
+    {
+      "shape": [
+        512
+      ],
+      "dtype": "float32",
+      "offset": 724736,
+      "bytes": 2048
+    },
+    {
+      "shape": [
+        128,
+        512
+      ],
+      "dtype": "float32",
+      "offset": 726784,
+      "bytes": 262144
+    },
+    {
+      "shape": [
+        128,
+        512
+      ],
+      "dtype": "float32",
+      "offset": 988928,
+      "bytes": 262144
+    },
+    {
+      "shape": [
+        512
+      ],
+      "dtype": "float32",
+      "offset": 1251072,
+      "bytes": 2048
+    },
+    {
+      "shape": [
+        256,
+        256
+      ],
+      "dtype": "float32",
+      "offset": 1253120,
+      "bytes": 262144
+    },
+    {
+      "shape": [
+        64,
+        256
+      ],
+      "dtype": "float32",
+      "offset": 1515264,
+      "bytes": 65536
+    },
+    {
+      "shape": [
+        256
+      ],
+      "dtype": "float32",
+      "offset": 1580800,
+      "bytes": 1024
+    },
+    {
+      "shape": [
+        256,
+        256
+      ],
+      "dtype": "float32",
+      "offset": 1581824,
+      "bytes": 262144
+    },
+    {
+      "shape": [
+        64,
+        256
+      ],
+      "dtype": "float32",
+      "offset": 1843968,
+      "bytes": 65536
+    },
+    {
+      "shape": [
+        256
+      ],
+      "dtype": "float32",
+      "offset": 1909504,
+      "bytes": 1024
+    },
+    {
+      "shape": [
+        128,
+        64
+      ],
+      "dtype": "float32",
+      "offset": 1910528,
+      "bytes": 32768
+    },
+    {
+      "shape": [
+        64
+      ],
+      "dtype": "float32",
+      "offset": 1943296,
+      "bytes": 256
+    },
+    {
+      "shape": [
+        64,
+        26
+      ],
+      "dtype": "float32",
+      "offset": 1943552,
+      "bytes": 6656
+    },
+    {
+      "shape": [
+        26
+      ],
+      "dtype": "float32",
+      "offset": 1950208,
+      "bytes": 104
+    }
+  ],
+  "weightBytes": 1950312,
+  "weightSha256": "1d6eca0d1872c912c5d292a1d4cdf3d6d647f7f265380d800845744e3ee7719b"
+}

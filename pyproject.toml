@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fsl-trainer"
+version = "0.1.0"
+description = "Portable FSL landmark preparation and Conv1D-BiLSTM training"
+requires-python = ">=3.12"
+dynamic = ["dependencies"]
+
+[project.scripts]
+fsl-trainer = "fsl_trainer.cli:main"
+fsl-categories = "fsl_trainer.categories:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
