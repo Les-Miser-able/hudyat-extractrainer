@@ -82,3 +82,62 @@ Replace `YOUR_REPOSITORY_URL` with your repository's clone URL. Before committin
 check the staged file list; original media and generated datasets should not
 appear, but trained checkpoints and browser exports should. Root-level npm manifests are legacy local files; use npm only inside
 `pwa-sample/`.
+
+## Project layout
+
+Python implementation lives in one package, organized by responsibility:
+
+```text
+fsl_trainer/
+  data/              Source extraction and per-category preparation/training commands
+  training/          Dataset preparation/validation, model training/prediction, disk cache
+  reporting/         Confusion-matrix rendering from saved results
+  dashboard/
+    server.py        Local HTTP interface, artifact browsing, and worker jobs
+    ui/              Dashboard HTML, CSS, and JavaScript
+  paths.py           Repository root for default artifact locations
+  progress.py        Shared terminal progress reporting
+tests/
+  data/              Category and extraction checks
+  training/          Preprocessing, model, and training-cache checks
+  dashboard/         HTTP, job, and JavaScript control checks
+  test_compatibility.py
+pwa-sample/          Independent webcam application, export tools, and its tests
+docs/                Project setup and verification records
+learning/            Lessons, learning notes, resources, and their browser assets
+```
+
+The root `trainer.py`, `categories.py`, `dashboard.py`, and
+`confusion_matrix.py` remain executable entry points. Existing imports of those
+names, `extraction`, `training_cache`, and `progress` resolve to their package
+implementations, so callers and patches share the same module globals. New
+Python code should import from `fsl_trainer` directly. The PWA exporter follows
+this convention; workers retain the established root CLI entry points.
+
+Artifact folders retain their existing locations: `data/`,
+`datasets_augmented/` (or a chosen dataset root), `runs/`, and `models/`.
+Default project paths do not depend on the current working directory. Dashboard
+assets are resolved beside its server implementation and retain the same URLs.
+Learning materials live together in `learning/`: `lessons/`, `assets/`,
+`reference/`, and the mission, notes, and resources documents. Start with
+[the learning index](../learning/README.md). `augmentation/` retains its
+development scaffolding and output conventions.
+
+The root retains `README.md`, dependency/Git configuration, and compatibility
+Python entry points. Existing `data/`, `datasets_augmented/`, `runs/`, and
+`models/` paths remain the defaults used by commands and saved artifacts.
+
+Run checks from the repository root:
+
+```powershell
+python -m unittest discover -v
+python -m unittest discover -s tests/dashboard -v
+node --test tests/dashboard/ui.test.cjs
+cd pwa-sample
+npm test
+npm run parity
+```
+
+The full Python suite uses the environment with the ML requirements installed.
+The dashboard-only Python and JavaScript checks need no ML dependencies.
+PWA tests and parity require the setup assets and browser exports described above.

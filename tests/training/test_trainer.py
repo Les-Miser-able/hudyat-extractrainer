@@ -1,4 +1,4 @@
-"""Run: python -m unittest -v test_trainer
+"""Run: python -m unittest -v tests.training.test_trainer
 TensorFlow tests are skipped only when TensorFlow is not installed.
 """
 import argparse

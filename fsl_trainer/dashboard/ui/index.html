@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f7f9">
+  <meta name="description" content="Your local workspace for Filipino Sign Language datasets, training, and evaluation.">
+  <title>FSL Studio · Training workspace</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='12' fill='%23ed7145'/%3E%3Cpath d='M12 12h17v5H17v4h10v5H17v6h-5z' fill='white'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="#overview"><span class="brand-mark">f<span>.</span></span><span>FSL Studio<small>MODEL WORKSPACE</small></span></a>
+    <p class="nav-label">WORKSPACE</p>
+    <nav aria-label="Main navigation">
+      <a href="#overview" data-view="overview"><span aria-hidden="true">◫</span>Overview</a>
+      <a href="#datasets" data-view="datasets"><span aria-hidden="true">▦</span>Datasets<span class="nav-count" id="nav-categories">–</span></a>
+      <a href="#training" data-view="training"><span aria-hidden="true">⌁</span>Training<span id="training-dot" class="activity-dot" hidden></span></a>
+      <a href="#runs" data-view="runs"><span aria-hidden="true">▤</span>Model runs</a>
+      <a href="#predict" data-view="predict"><span aria-hidden="true">◎</span>Try a prediction</a>
+    </nav>
+    <div class="sidebar-note"><span class="note-icon" aria-hidden="true">✳</span><strong>A little more understanding.</strong><p>Build models that bring Filipino Sign Language closer.</p></div>
+    <div class="local-profile"><span class="avatar">FS</span><div>Local workspace<small><span class="status-dot"></span> On your machine</small></div><span class="profile-icon" aria-hidden="true">⌘</span></div>
+  </aside>
+  <div class="page">
+    <header class="topbar"><div><span class="muted">Workspace</span><span class="slash">/</span><span id="breadcrumb">Overview</span></div><div class="topbar-right"><span class="local-badge"><span class="status-dot"></span> Local only</span><button id="refresh" class="icon-button" aria-label="Refresh project data" title="Refresh project data">↻</button></div></header>
+    <main>
+      <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+      <section id="view-overview" class="view">
+        <div class="page-heading"><div><p class="eyebrow">YOUR TRAINING WORKSPACE</p><h1>A clearer view of every sign.</h1><p>From your first sample to your next model. All in one place.</p></div><a class="button primary" href="#training">New training run <span aria-hidden="true">↗</span></a></div>
+        <div class="stats" id="stats" aria-label="Project statistics"><article class="stat"><span>Loading your workspace…</span></article></div>
+        <div class="overview-grid">
+          <section class="card category-overview"><div class="card-heading"><div><h2>Your categories</h2><p>A separate model for every kind of gesture.</p></div><a class="text-link" href="#datasets">View datasets ↗</a></div><div id="category-list" class="category-list"></div></section>
+          <section class="card workflow-card"><span class="eyebrow">THE NEXT STEP</span><h2>Small steps.<br>Better models.</h2><p>Keep your workflow moving, one category at a time.</p><ol class="workflow"><li><span>01</span><div><a href="#datasets">Prepare your dataset ↗</a><small>Extract landmarks and create safe splits.</small></div></li><li><span>02</span><div><a href="#training">Train a model ↗</a><small>Start a fresh Conv1D–BiLSTM run.</small></div></li><li><span>03</span><div><a href="#runs">See how it performed ↗</a><small>Review test scores and learning curves.</small></div></li></ol><div class="architecture"><span class="status-dot"></span> 32 frames <span>×</span> 128 features <span>→</span> a little understanding</div></section>
+        </div>
+        <section class="card"><div class="card-heading"><div><h2>Recent model runs</h2><p>The latest experiments in your workspace.</p></div><a class="text-link" href="#runs">All runs ↗</a></div><div id="recent-runs" class="table-wrap"></div></section>
+      </section>
+
+      <section id="view-datasets" class="view" hidden>
+        <div class="page-heading"><div><p class="eyebrow">01 / BUILD YOUR FOUNDATION</p><h1>Every sample matters.</h1><p>Explore source gestures and prepare datasets for training.</p></div></div>
+        <section class="card"><div class="card-heading"><div><h2>Project folders</h2><p>Paths are relative to this repository. Refresh to scan your selected folders.</p></div></div><div class="folder-settings"><label>Source root<input id="data-root" value="data" spellcheck="false"></label><label>Dataset root<input id="dataset-root" value="datasets_augmented" spellcheck="false"></label><button id="scan-folders" class="button secondary">Scan folders ↻</button></div></section>
+        <div class="split-layout">
+          <section class="card"><div class="card-heading"><div><h2>Source library</h2><p>Images, videos, and normalized landmarks.</p></div></div><label class="search-label"><span class="sr-only">Search categories</span><input id="category-search" type="search" placeholder="Search categories…"></label><div id="dataset-list"></div><p class="hint">Add files under <code>data/&lt;category&gt;/&lt;gesture&gt;/</code>. Each category needs at least two classes and three independent source groups per class.</p></section>
+          <section class="card"><div class="card-heading"><div><h2>Prepare a dataset</h2><p>Split original sources before generating variants.</p></div><span class="tag">PREPARATION</span></div>
+            <p id="prepare-readiness" class="hint" role="status" aria-live="polite"></p>
+            <p id="prepare-error" class="notice error" role="alert" hidden></p>
+            <form id="prepare-form"><label>Category<select name="category" class="category-select" required></select></label><div class="field-grid"><label>Validation fraction<input name="validation" type="number" value="0.15" min="0.001" max="0.99" step="0.001" required></label><label>Test fraction<input name="test" type="number" value="0.15" min="0.001" max="0.99" step="0.001" required></label><label>Static variants<input name="variants" type="number" value="8" min="1" max="1000" required></label><label>Jitter<input name="jitter" type="number" value="0.0075" min="0" max="1" step="0.0001" required></label></div><details><summary>Extraction settings</summary><div class="field-grid"><label>Detection confidence<input name="confidence" type="number" value="0.5" min="0" max="1" step="0.01"></label><label>Random seed<input name="seed" type="number" value="42" min="0" max="4294967295"></label></div><label>Group CSV (optional)<input name="groups" placeholder="groups/alphabet.csv" spellcheck="false"></label><label>Hand model (optional)<input name="hand_model" placeholder="models/hand_landmarker.task" spellcheck="false"></label><label class="checkbox"><input type="checkbox" name="swap_hands"> Swap detected left and right hands</label></details><p class="hint">Existing datasets are protected. Choose a new dataset root to prepare another version. The trainer checks independent groups after extraction.</p><button class="button primary submit-job" type="submit">Prepare dataset <span>↗</span></button></form>
+          </section>
+        </div>
+      </section>
+
+      <section id="view-training" class="view" hidden>
+        <div class="page-heading"><div><p class="eyebrow">02 / FIND THE PATTERN</p><h1>Make your next breakthrough.</h1><p>Configure a run, then follow its progress as it happens.</p></div><span class="tag">Conv1D + BiLSTM</span></div>
+        <div class="split-layout"><section class="card"><div class="card-heading"><div><h2>New training run</h2><p>One category. One fresh model.</p></div></div><form id="train-form"><label>Category<select name="category" class="category-select" required></select></label><label>Run name<input id="run-name" name="run" required placeholder="experiment-01" pattern="[^/\\:*?&quot;&lt;&gt;|]+" spellcheck="false"></label><div class="field-grid"><label>Epochs<input name="epochs" type="number" value="100" min="1" max="10000" required></label><label>Batch size<input name="batch_size" type="number" value="32" min="1" max="65536" required></label><label>Learning rate<input name="learning_rate" type="number" value="0.001" min="0.0000000001" max="1" step="any" required></label><label>Early stopping patience<input name="patience" type="number" value="12" min="1" max="10000" required></label></div><details><summary>Advanced settings</summary><label>Random seed<input name="seed" type="number" value="42" min="0" max="4294967295"></label><label class="checkbox"><input name="class_weights" type="checkbox"> Balance classes with training weights</label></details><p id="training-source" class="hint"></p><button class="button primary submit-job" type="submit">Start training <span>↗</span></button></form></section><section class="card training-info"><span class="eyebrow">UNDER THE HOOD</span><div class="network-art" aria-hidden="true"><span>◉</span><i></i><span>▥</span><i></i><span>⌁</span><i></i><span>◎</span></div><h2>Built for stillness.<br>Ready for movement.</h2><p>Static poses and dynamic gestures share the same input and classifier. Your selected category determines the model’s output classes.</p><dl><div><dt>Input sequence</dt><dd>32 × 128</dd></div><div><dt>Architecture</dt><dd>Conv1D → BiLSTM</dd></div><div><dt>Checkpoint</dt><dd>Best validation model</dd></div><div><dt>Execution</dt><dd>One local job at a time</dd></div></dl><p class="hint">Training uses the Python environment that launched this dashboard. Install <code>requirements.txt</code> in that environment before starting a job.</p></section></div>
+      </section>
+
+      <section id="view-runs" class="view" hidden>
+        <div class="page-heading"><div><p class="eyebrow">03 / LEARN FROM THE RESULTS</p><h1>A record of your progress.</h1><p>Compare experiments and take a closer look at each model.</p></div><a href="#training" class="button primary">New training run ↗</a></div>
+        <section class="card"><div class="card-heading"><h2>Model runs</h2><label class="inline-label"><span class="sr-only">Filter runs by category</span><select id="run-filter"><option value="">All categories</option></select></label></div><div id="all-runs" class="table-wrap"></div></section>
+        <section id="run-detail" class="card" hidden><div class="card-heading"><div><h2 id="run-detail-title"></h2><p id="run-detail-path"></p></div><button id="use-run" class="button secondary">Try this model ↗</button></div><div id="run-metrics" class="stats compact"></div><div class="chart-title"><h3>Learning curve</h3><span><i class="legend train"></i>Training <i class="legend validation"></i>Validation</span></div><div id="learning-chart"></div><h3>Gesture classes</h3><div id="run-classes" class="chips"></div></section>
+      </section>
+
+      <section id="view-predict" class="view" hidden>
+        <div class="page-heading"><div><p class="eyebrow">04 / PUT IT TO THE TEST</p><h1>Give your model a sign.</h1><p>Run a local image, video, or landmark sample through a saved model.</p></div></div>
+        <div class="split-layout"><section class="card"><div class="card-heading"><div><h2>Sample prediction</h2><p>Use the same extraction convention as training.</p></div></div><form id="predict-form"><label>Trained model<select id="predict-run" name="run" required></select></label><label>Sample path<input name="sample" required placeholder="data/alphabet/A/image001.jpg" spellcheck="false"></label><label>Custom hand model (optional)<input name="hand_model" placeholder="models/hand_landmarker.task" spellcheck="false"></label><p class="hint">Choose a file inside this project. Models trained only on pre-extracted landmarks require a normalized <code>.npy</code> sample.</p><button class="button primary submit-job" type="submit">Recognize sample <span>↗</span></button></form></section><section class="card"><div class="card-heading"><div><h2>Recognition</h2><p>Top predictions from the latest successful sample.</p></div><span class="tag">ON DEVICE</span></div><div id="prediction-result" class="empty-state"><span aria-hidden="true">◎</span><h3>Ready for your first sign.</h3><p>Select a model and a sample to see its predictions.</p></div></section></div>
+      </section>
+
+      <section class="card jobs-card" id="jobs-panel"><div class="card-heading"><div><h2>Activity <span id="job-state" class="tag">IDLE</span></h2><p id="job-description">Your preparation, training, and prediction jobs will appear here.</p></div><div class="job-actions"><label><span class="sr-only">Choose a job</span><select id="job-select" hidden></select></label><button id="cancel-job" class="button danger" hidden>Stop job</button></div></div><pre id="job-log" tabindex="0" aria-label="Job output">No jobs yet. Your workspace is ready.</pre><p class="hint">Activity history lasts until the server restarts. Datasets, models, and training reports stay in their project folders.</p></section>
+      <footer><span>FSL Studio <span class="footer-dot">·</span> A workspace for understanding.</span><span id="environment">Local processing. Your data stays here.</span></footer>
+    </main>
+  </div>
+</body>
+</html>

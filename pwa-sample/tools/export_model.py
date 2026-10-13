@@ -9,7 +9,7 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-from trainer import build_model, tensorflow
+from fsl_trainer.training.trainer import build_model, tensorflow
 
 
 def normalized(config):

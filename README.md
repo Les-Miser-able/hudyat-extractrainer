@@ -1,12 +1,52 @@
 # FSL Conv1D–BiLSTM trainer
 
 For a fresh clone, PWA asset setup, and first-push instructions, see
-[REPOSITORY.md](REPOSITORY.md). Trained models are included; training data stays local.
+[REPOSITORY.md](docs/REPOSITORY.md). Trained models are included; training data stays local.
+The [project layout](docs/REPOSITORY.md#project-layout) groups Python implementations
+under `fsl_trainer/` and checks under `tests/`; existing root Python commands
+and imports remain supported. Project setup and verification records live in
+`docs/`; lessons, references, and learning notes live in [learning/](learning/README.md).
 
 Augmentation development folders and output conventions are documented in
 [augmentation/README.md](augmentation/README.md).
 
 A TensorFlow trainer with automatic hand-landmark extraction from raw images and videos. Existing normalized .npy landmarks are also accepted. Static poses and dynamic gestures use the same (32, 128) input, classifier and saved Keras model. No per-letter special cases.
+
+## Local training dashboard
+
+Start the browser UI from the repository root:
+
+```powershell
+python dashboard.py
+```
+
+Open **http://localhost:8090**. FSL Studio provides an overview of real source
+counts and model scores, dataset preparation and validation, configurable training,
+saved-run comparisons with learning curves, and prediction from a project-local
+image, video, or `.npy` file. Activity logs stream while jobs run; use **Stop job**
+to cancel. Partial outputs are kept, so choose a new output folder/run name to retry.
+
+The dashboard itself uses only Python's standard library. Preparation, training,
+and prediction use the **same Python environment that starts the dashboard** and
+need the dependencies in `requirements.txt`. If using the quick-start environment,
+launch it with `.\.venv\Scripts\python.exe dashboard.py`. Browsing saved results
+does not require TensorFlow. Use `--port 8091` if the default port is occupied.
+
+The default source root is `data`, dataset root is `datasets_augmented`, and model
+root is `runs`. Change the first two under **Datasets → Project folders → Scan
+folders**, for example to use the CLI's `datasets` default. Paths must stay inside
+the project. Existing datasets and runs are protected from overwrite. Add source
+files through your file manager, then refresh the dashboard. A prepared manifest
+indicates an existing dataset; **Validate dataset** performs the full trainer check.
+The dashboard starts one job at a time and binds only to loopback. Activity history
+is held in memory until restart; generated artifacts remain in the usual folders.
+
+The existing [FSL Pocket webcam app](pwa-sample/README.md) remains available
+separately. Its setup/export workflow is unchanged.
+
+Dashboard checks (no ML dependencies needed):
+`python -m unittest discover -s tests/dashboard -v` and
+`node --test tests/dashboard/ui.test.cjs`.
 
 ## Categories: one model for each
 
@@ -68,7 +108,7 @@ runs/numbers/first/classes.json
 runs/numbers/first/test_metrics.json
 ```
 
-Other training artifacts are stored alongside each model. Prediction uses the chosen category's run directory; there is no automatic category classifier. Category defaults resolve relative to categories.py, so commands work from another working directory when you pass the script's full path.
+Other training artifacts are stored alongside each model. Prediction uses the chosen category's run directory; there is no automatic category classifier. Category defaults resolve relative to the repository root, so commands work from another working directory when you pass the script's full path.
 
 Existing outputs are protected. Use a new --run name for retraining (omitting it generates a timestamp). To prepare another dataset version use --datasets datasets_v2 on both category prepare and train commands. --data and --runs override the source and model roots.
 

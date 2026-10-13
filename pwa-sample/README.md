@@ -3,7 +3,7 @@
 **Fresh clone:** exported models and the shared hand detector are included.
 Run `npm ci` and `npm run setup` in this folder to recreate browser libraries.
 Export additional trained models as described below.
-See [repository setup](../REPOSITORY.md).
+See [repository setup](../docs/REPOSITORY.md).
 
 Choose a category, download its model, turn on the camera, and recognize a held pose or a two-second gesture. Camera frames and predictions stay in the browser. The server only serves static files.
 
