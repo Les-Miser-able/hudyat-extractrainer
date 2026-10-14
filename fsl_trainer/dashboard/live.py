@@ -7,6 +7,7 @@ import subprocess
 import sys
 import threading
 import time
+from .timing import capture_timing
 
 
 class LiveInference:
@@ -76,7 +77,7 @@ class LiveInference:
                 self.session = secrets.token_hex(16)
                 self.last_frame = time.monotonic()
                 return {"session": self.session, "mode": mode,
-                        "window_seconds": None if mode == 'gesture' else 2}
+                        "window_seconds": None}
             except Exception:
                 self.stop()
                 raise
@@ -90,8 +91,11 @@ class LiveInference:
             raise ValueError(response["error"])
         return response
 
-    def frame(self, session, image, timestamp):
-        return self.exchange(session, {"image": image, "timestamp": timestamp})
+    def frame(self, session, image, timestamp, timing=None):
+        request = {"image": image, "timestamp": timestamp}
+        if timing is not None:
+            request["timing"] = capture_timing(timing)
+        return self.exchange(session, request)
 
     def reset(self, session):
         return self.exchange(session, {"action": "reset"})

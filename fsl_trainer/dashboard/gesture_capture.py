@@ -1,21 +1,29 @@
 """Capture one movement and keep its boundaries until explicitly reset."""
 from collections import deque
 import numpy as np
+from .timing import DEFAULT_SETTLE_MS, DEFAULT_MISSING_MS, capture_timing
 
 
 class GestureCapture:
     PRE_ROLL_MS = 600
-    SETTLE_MS = 800
-    MISSING_MS = 600
+    SETTLE_MS = DEFAULT_SETTLE_MS
+    MISSING_MS = DEFAULT_MISSING_MS
     MAX_DURATION_MS = 6000
     SPEED_THRESHOLD = .04  # Mean landmark XY movement in image units per second.
 
     def __init__(self):
+        self.settle_ms = self.SETTLE_MS
+        self.missing_ms = self.MISSING_MS
         self.reset()
+
+    def configure(self, timing):
+        settings = capture_timing(timing)
+        self.settle_ms = settings.get('settle_ms', self.settle_ms)
+        self.missing_ms = settings.get('missing_ms', self.missing_ms)
 
     def reset(self):
         self.state = 'waiting'
-        self.frames = deque(maxlen=256)
+        self.frames = deque(maxlen=512)
         self.previous = None
         self.onset_hits = 0
         self.onset_distance = 0.
@@ -84,8 +92,8 @@ class GestureCapture:
             self.state = 'incomplete'
             self.frames.clear()
             return {'status': 'incomplete', 'message': 'Capture took too long. Select Next gesture and try again.'}
-        settled = present and timestamp - self.last_motion >= self.SETTLE_MS
-        lowered = self.missing_since is not None and timestamp - self.missing_since >= self.MISSING_MS
+        settled = present and timestamp - self.last_motion >= self.settle_ms
+        lowered = self.missing_since is not None and timestamp - self.missing_since >= self.missing_ms
         if settled or lowered:
             if duration < 400 or self.distance < .025:
                 self.reset()

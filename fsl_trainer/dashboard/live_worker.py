@@ -1,7 +1,6 @@
 """Camera frame -> landmarks -> inference; JSON lines on stdin/stdout, nothing saved."""
 import argparse
 import base64
-from collections import deque
 from contextlib import redirect_stdout
 import hashlib
 import io
@@ -16,17 +15,21 @@ from ..data.extraction import Extractor, DEFAULT_MODEL, pack_result
 from ..data.sequences import resample
 from ..training.trainer import tensorflow
 from .gesture_capture import GestureCapture
+from .timing import capture_timing
 
 
 class LivePredictor:
     def __init__(self, model, classes, extractor, mode):
         self.model, self.classes, self.extractor, self.mode = model, classes, extractor, mode
         self.detector = extractor.detector(video=True) if mode in ("motion", "gesture") else None
-        self.capture = GestureCapture() if mode == 'gesture' else None
-        self.frames = deque(maxlen=256)
+        self.capture = GestureCapture() if mode in ('gesture', 'motion') else None
+        self.has_result = False
         self.previous = -1
 
-    def frame(self, rgb, timestamp):
+    def frame(self, rgb, timestamp, timing=None):
+        settings = capture_timing(timing)
+        if self.capture:
+            self.capture.configure(settings)
         if (isinstance(timestamp, bool) or not isinstance(timestamp, (int, float))
                 or not math.isfinite(timestamp) or timestamp < 0 or timestamp > 2**53):
             raise ValueError("Invalid camera timestamp.")
@@ -38,7 +41,6 @@ class LivePredictor:
             return self.capture.push(None, timestamp)
         # Long pauses start a new gesture window instead of interpolating a stale one.
         if timestamp - self.previous > 1000:
-            self.frames.clear()
             if self.capture:
                 self.capture.reset()
         self.previous = timestamp
@@ -50,43 +52,42 @@ class LivePredictor:
         if self.capture:
             captured = self.capture.push(features, timestamp)
             if captured['status'] != 'complete':
+                if self.mode == 'motion' and captured['status'] == 'waiting' and self.has_result:
+                    captured.update(keep_result=True,
+                                    message='Result held. Perform another gesture when ready.')
+                elif captured['status'] == 'capturing':
+                    self.has_result = False
                 return captured
             frames = captured['frames']
             times = np.array([item[0] for item in frames])
             positions = np.interp(np.linspace(times[0], times[-1], 32), times, np.arange(len(times)))
             sequence = resample(np.stack([item[1] for item in frames]), positions)
         elif not features[126:].any():
-            self.frames.clear()
             return {"status": "no_hand", "probabilities": {}, "message": "No hand detected."}
-        elif self.mode == "pose":
-            sequence = resample(features[None])
         else:
-            self.frames.append((timestamp, features))
-            # Keep one boundary frame to cover the full two-second interval.
-            while len(self.frames) > 2 and self.frames[1][0] <= timestamp - 2000:
-                self.frames.popleft()
-            duration = timestamp - self.frames[0][0]
-            if duration < 2000:
-                return {"status": "buffering", "probabilities": {},
-                        "progress": duration / 2000, "message": "Collecting two seconds of movement…"}
-            times = np.array([item[0] for item in self.frames])
-            positions = np.interp(np.linspace(timestamp - 2000, timestamp, 32), times, np.arange(len(times)))
-            sequence = resample(np.stack([item[1] for item in self.frames]), positions)
+            sequence = resample(features[None])
         probabilities = np.asarray(self.model(sequence[None], training=False))[0]
         if (probabilities.shape != (len(self.classes),) or not np.isfinite(probabilities).all()
                 or (probabilities < 0).any() or (probabilities > 1).any()):
             raise ValueError("The selected model returned invalid class probabilities.")
         response = {"status": "prediction", "probabilities": dict(zip(self.classes, map(float, probabilities))),
-                    "frames": len(captured['frames']) if captured else 1 if self.mode == "pose" else len(self.frames)}
+                    "frames": len(captured['frames']) if captured else 1}
         if captured:
             response.update(complete=True, duration_ms=captured['duration_ms'],
                             message='Gesture captured. Result held until you select Next gesture.')
+            if self.mode == 'motion':
+                # Keep the completed result while buffering the next movement. Missing
+                # hands and a held ending must never replace it with a pose-only tail.
+                self.capture.reset()
+                self.has_result = True
+                response['message'] = 'Gesture captured. Result held; perform another gesture when ready.'
         return response
 
     def reset(self):
         if not self.capture:
-            raise ValueError('Next gesture is available only in Perform once mode.')
+            raise ValueError('Next gesture is available only in movement capture modes.')
         self.capture.reset()
+        self.has_result = False
         return {'status': 'waiting', 'message': 'Ready. Perform the gesture once, then hold the ending still.'}
 
     def close(self):
@@ -150,7 +151,7 @@ def main():
                 request = json.loads(line)
                 with redirect_stdout(sys.stderr):
                     result = (predictor.reset() if request.get('action') == 'reset'
-                              else predictor.frame(decode_frame(request["image"]), request["timestamp"]))
+                              else predictor.frame(decode_frame(request["image"]), request["timestamp"], request.get("timing")))
                 reply(result)
             except Exception as error:
                 reply({"error": str(error)})

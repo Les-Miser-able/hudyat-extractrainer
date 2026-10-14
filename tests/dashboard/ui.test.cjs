@@ -327,3 +327,75 @@ test('Next gesture ignores a completed prediction from before the reset', async 
   assert.equal(app.node('live-result').innerHTML, '');
   await app.run('stopLive()');
 });
+
+
+test('continuous movement preserves a completed result when hands disappear and clears it for new capture', async () => {
+  const app = dashboard();
+  app.node('live-mode').value = 'motion';
+  app.run("liveActive = true; liveSession = 'fixture'; controls(); showLiveResult({status: 'prediction', probabilities: {afternoon: .9}});");
+  assert.equal(app.node('live-next').hidden, false);
+  const result = app.node('live-result').innerHTML;
+  app.run("showLiveResult({status: 'waiting', keep_result: true, message: 'Result held. Perform another gesture when ready.'})");
+  assert.equal(app.node('live-result').innerHTML, result);
+  app.run("showLiveResult({status: 'capturing', message: 'Capturing the full gesture…'})");
+  assert.equal(app.node('live-result').innerHTML, '');
+  app.context.fetch = async () => ({ok: true, json: async () => ({status: 'waiting'})});
+  await app.run('nextGesture()');
+  assert.equal(app.run('liveSession'), 'fixture');
+});
+
+
+test('camera cadence counts processing time and never adds a fixed pause after a slow frame', async () => {
+  for (const processingMs of [20, 120]) {
+    const app = dashboard();
+    camera(app);
+    let now = 0;
+    const timers = [];
+    app.context.performance.now = () => now;
+    app.context.setTimeout = (fn, delay) => { timers.push({fn, delay}); return timers.length; };
+    app.context.fetch = async url => {
+      if (url.endsWith('/frame')) now = processingMs;
+      return {ok: true, json: async () => url.endsWith('/start') ? {session: 'fixture'}
+        : url.endsWith('/frame') ? {status: 'capturing'} : {ok: true}};
+    };
+    await app.run('startLive()');
+    assert.equal(timers.length, 1);
+    assert.equal(timers[0].delay, Math.max(0, 50 - processingMs));
+    await app.run('stopLive()');
+  }
+});
+
+
+test('timing sliders change labels and subsequent camera requests without resetting capture', async () => {
+  const app = dashboard();
+  camera(app);
+  const requests = [], timers = [];
+  app.context.setTimeout = (fn, delay) => { timers.push({fn, delay}); return timers.length; };
+  app.context.fetch = async (url, options) => {
+    requests.push([url, JSON.parse(options.body)]);
+    return {ok: true, json: async () => url.endsWith('/start') ? {session: 'fixture'}
+      : url.endsWith('/frame') ? {status: 'capturing'} : {ok: true}};
+  };
+  await app.run('startLive()');
+  const first = requests.find(([url]) => url.endsWith('/frame'))[1];
+  assert.deepEqual(first.timing, {settle_ms: 600, missing_ms: 400});
+  for (const [id, value, output] of [
+    ['live-settle-ms', '250', 'live-settle-value'],
+    ['live-missing-ms', '900', 'live-missing-value'],
+    ['live-frame-ms', '120', 'live-frame-value']
+  ]) {
+    app.node(id).value = value;
+    app.node(id).handlers.input();
+    assert.equal(app.node(output).textContent, value + ' ms');
+    assert.equal(app.node(id).disabled, false);
+  }
+  await timers.shift().fn();
+  const frames = requests.filter(([url]) => url.endsWith('/frame'));
+  assert.equal(frames.length, 2);
+  assert.deepEqual(frames[1][1].timing, {settle_ms: 250, missing_ms: 900});
+  assert.equal(timers[0].delay, 120);
+  assert.equal(requests.filter(([url]) => url.endsWith('/start')).length, 1);
+  assert.equal(requests.filter(([url]) => url.endsWith('/reset')).length, 0);
+  assert.equal(app.run('liveSession'), 'fixture');
+  await app.run('stopLive()');
+});

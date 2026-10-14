@@ -134,7 +134,7 @@ function controls() {
   $('live-stop').disabled = !liveActive;
   $('predict-run').disabled = liveActive;
   $('live-mode').disabled = liveActive;
-  $('live-next').hidden = $('live-mode').value !== 'gesture';
+  $('live-next').hidden = !['gesture', 'motion'].includes($('live-mode').value);
   $('live-next').disabled = !liveActive || !liveSession || liveResetting;
   const category = state.categories.find(c => c.name === $('prepare-form').elements.category.value);
   const selection = sourceSelection();
@@ -215,6 +215,19 @@ function showLiveResult(result) {
   const [label, confidence] = ranked[0];
   $('live-result').innerHTML = `<div class="prediction-main">${escapeHTML(label)}</div><div class="prediction-confidence">${percent(confidence)} model confidence${confidence < .6 ? ' · Uncertain' : ''}</div>${ranked.slice(0, 5).map(([name, score]) => `<div class="prediction-row"><span>${escapeHTML(name)}</span><meter min="0" max="1" value="${score}"></meter><span>${percent(score)}</span></div>`).join('')}`;
 }
+function liveTiming() {
+  return {settle_ms: Number($('live-settle-ms').value || 600),
+    missing_ms: Number($('live-missing-ms').value || 400)};
+}
+function liveFrameInterval() {
+  return Number($('live-frame-ms').value || 50);
+}
+function renderLiveTiming() {
+  const timing = liveTiming();
+  $('live-settle-value').textContent = `${timing.settle_ms} ms`;
+  $('live-missing-value').textContent = `${timing.missing_ms} ms`;
+  $('live-frame-value').textContent = `${liveFrameInterval()} ms`;
+}
 async function liveFrame(version) {
   if (version !== liveVersion || !liveSession) return;
   if (liveResetting) {
@@ -222,6 +235,7 @@ async function liveFrame(version) {
     return;
   }
   const captureVersion = liveCaptureVersion;
+  const frameStartedAt = performance.now();
   try {
     const video = $('live-video'), canvas = $('live-canvas');
     if (!video.videoWidth || video.readyState < 2) {
@@ -233,10 +247,12 @@ async function liveFrame(version) {
     canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
     canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
     const result = await api('/api/live/frame', {session: liveSession,
-      image: canvas.toDataURL('image/jpeg', .8), timestamp: performance.now()});
+      image: canvas.toDataURL('image/jpeg', .8), timestamp: performance.now(), timing: liveTiming()});
     if (version !== liveVersion) return;
     if (captureVersion === liveCaptureVersion) showLiveResult(result);
-    liveTimer = setTimeout(() => liveFrame(version), 200);
+    // Keep requests serial and count processing time toward the frame interval.
+    const delay = Math.max(0, liveFrameInterval() - (performance.now() - frameStartedAt));
+    liveTimer = setTimeout(() => liveFrame(version), delay);
   } catch (error) {
     if (version !== liveVersion) return;
     await stopLive();
@@ -403,6 +419,10 @@ $('live-start').addEventListener('click', startLive);
 $('live-stop').addEventListener('click', stopLive);
 $('live-mode').addEventListener('change', controls);
 $('live-next').addEventListener('click', nextGesture);
+for (const id of ['live-settle-ms', 'live-missing-ms', 'live-frame-ms']) {
+  $(id).addEventListener('input', renderLiveTiming);
+}
+renderLiveTiming();
 window.addEventListener('pagehide', () => {
   const session = liveSession;
   stopLive();

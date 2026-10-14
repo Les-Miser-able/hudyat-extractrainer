@@ -21,6 +21,7 @@ from ..data.augmentation_options import extra_samples, time_warp
 from ..data.source_selection import SUPPORTED, VIDEO_EXTENSIONS, source_files, folder_selection
 from ..data.dataset_paths import dataset_name, prepared_datasets, select_dataset
 from .live import LiveInference
+from .timing import capture_timing
 
 BASE = PROJECT_ROOT
 UI = Path(__file__).resolve().parent / "ui"
@@ -410,7 +411,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(image, str) or not image.startswith("data:image/jpeg;base64,") or len(image) > 900_000:
                     raise ValueError("Send a JPEG camera frame smaller than 900 KB.")
                 timestamp = number(data, "timestamp", None, 0, 2**53)
-                return self.reply(self.server.live.frame(data.get("session"), image, timestamp))
+                settings = {"timing": capture_timing(data["timing"])} if "timing" in data else {}
+                return self.reply(self.server.live.frame(data.get("session"), image, timestamp, **settings))
             if self.path == "/api/live/stop":
                 if not isinstance(data.get("session"), str) or not data["session"]:
                     raise ValueError("Specify the live session to stop.")

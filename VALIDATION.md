@@ -1,5 +1,61 @@
 # Verification
 
+## Live recognition timing sliders — 2026-10-14
+
+- Added editable sliders for Stillness delay (100–2,000 ms), Hands missing
+  delay (100–2,000 ms), and Frame interval (20–500 ms), defaulting to
+  600/400/50 ms. Values and labels update immediately; capture settings travel
+  with the next serial camera request and modify the existing capture without
+  resetting buffered frames or restarting its worker/model.
+- Shared validation rejects unsupported keys and invalid capture timings before
+  worker exchange. Resetting or automatically rearming capture preserves its
+  timing settings. Increased the bounded buffer to 512 frames so the fastest
+  selectable interval can retain a full gesture within the six-second limit.
+- All 47 dashboard Python tests and 20 JavaScript checks passed. New checks
+  exercise live changes during stillness and missing hands, retention of early
+  movement, worker reuse, HTTP validation, slider label/request/cadence updates,
+  and a five-second gesture at the minimum 20 ms interval.
+- Browser control was unavailable for visual inspection in this session.
+  Physical camera behavior and recognition accuracy were not measured.
+
+## Faster movement recognition — 2026-10-14
+
+- Reduced completion thresholds from 800 to 600 ms for stillness and from 600
+  to 400 ms for missing hands. The buffered sequence and held result behavior
+  remain intact. Pauses or detection gaps reaching these thresholds can finish
+  capture; physical-camera accuracy needs separate evaluation.
+- Camera requests remain serial, with a 50 ms target interval that includes
+  processing time. Replaced the unconditional 200 ms wait after each response;
+  slower processing schedules the next frame without an extra fixed pause.
+- Before/after replay through LivePredictor with deterministic 50 ms landmark
+  frames measured completion delays of 800 -> 600 ms (stillness) and
+  600 -> 400 ms (missing hands). These measure capture logic, not end-to-end
+  physical webcam or trained-model inference latency.
+- Timing regression checks failed before the change and passed afterward.
+  All 42 dashboard Python tests and 19 JavaScript UI tests passed, including
+  movement retention, brief tracking gaps, consecutive captures, serial frame
+  requests, and scheduling with fast and slow processing. Reproduce with
+  the dashboard commands recorded below.
+
+## Movement retention after hands leave — 2026-10-14
+
+- Moving gesture now buffers complete movement using the existing capture
+  boundaries instead of repeatedly classifying a sliding two-second tail.
+  Brief missing-hand gaps remain in the sequence; 600 ms without hands
+  completes capture. The result remains visible while waiting for another
+  movement. Perform once still requires explicit reset; held pose is unchanged.
+- The real LivePredictor path was tested using deterministic landmark frames
+  and a sequence-sensitive fixture classifier. Before the change, holding the
+  ending replaced movement with a pose-only prediction, and removing hands
+  immediately discarded the buffer. Both regressions now pass, along with
+  brief-gap recovery and consecutive-movement capture.
+- All 40 dashboard Python tests and 18 JavaScript UI tests passed. Reproduce
+  with `.\.venv\Scripts\python.exe -m unittest discover -s tests/dashboard -v`
+  and `node --test tests/dashboard/ui.test.cjs`.
+- Physical camera behavior and real greetings accuracy were not measured in
+  this check. Saved training data, checkpoints, and evaluation metrics were
+  not modified.
+
 ## Named prepared datasets — 2026-10-14
 
 - Dashboard preparation now targets `<dataset root>/<category>/<dataset name>`.

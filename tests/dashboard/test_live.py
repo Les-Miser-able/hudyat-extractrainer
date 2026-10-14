@@ -27,6 +27,7 @@ class LiveControllerTests(unittest.TestCase):
         with self.worker(script) as starts:
             ready = self.live.start('fixture', None, 'motion')
             session = ready['session']
+            self.assertIsNone(ready['window_seconds'])
             self.assertEqual(self.live.frame(session, 'fixture', 1)['status'], 'no_hand')
             self.assertEqual(self.live.frame(session, 'fixture', 2)['status'], 'no_hand')
             self.assertEqual(starts.call_count, 1)
@@ -63,6 +64,18 @@ class LiveControllerTests(unittest.TestCase):
             self.assertEqual(self.live.reset(ready['session'])['status'], 'waiting')
             self.assertEqual(starts.call_count, 1)
             self.assertTrue(self.jobs.live_active)
+
+    def test_live_timing_changes_reuse_worker_and_invalid_values_keep_session(self):
+        script = "import json,sys; print(json.dumps({'ready':True}),flush=True)\nfor line in sys.stdin: print(json.dumps({'timing':json.loads(line).get('timing')}),flush=True)"
+        with self.worker(script) as starts:
+            ready = self.live.start('fixture', None, 'motion')
+            for timing in ({'settle_ms': 200, 'missing_ms': 800}, {'settle_ms': 1500, 'missing_ms': 150}):
+                self.assertEqual(self.live.frame(ready['session'], 'fixture', 1, timing)['timing'], timing)
+            with self.assertRaises(ValueError):
+                self.live.frame(ready['session'], 'fixture', 2, {'missing_ms': False})
+            self.assertEqual(starts.call_count, 1)
+            self.assertTrue(self.jobs.live_active)
+            self.assertIsNotNone(self.live.session)
 
     def test_shutdown_interrupts_a_pending_camera_response(self):
         script = ("import json,sys,time; print(json.dumps({'ready':True}),flush=True); "

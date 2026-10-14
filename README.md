@@ -78,12 +78,15 @@ separately. Its setup/export workflow is unchanged.
 **Try a prediction → Live camera prediction** uses the trained run selected above
 the camera panel. The default **Perform once** mode automatically captures one
 gesture: show your hands, perform the complete gesture, then hold the ending
-still for about a second. The result stays displayed even if you keep holding
+still for about 600 ms. The result stays displayed even if you keep holding
 the ending or lower your hands. Select **Next gesture** to reset capture without
-reloading the camera or model. **Moving gesture** retains the rolling two-second
-mode, and **Held pose** classifies the current pose. Press **Start camera** and
-allow camera access. Frames are processed serially at up to five times per
-second, depending on CPU speed. **Stop camera**, leaving
+reloading the camera or model. **Moving gesture** continuously captures complete
+movements, holds each completed result, and automatically starts capture when
+you move again. **Next gesture** can also clear or retry this mode. **Held pose**
+classifies the current pose. Press **Start camera** and
+allow camera access. Frames are processed serially, by default at up to 20 times per
+second depending on CPU speed. Processing time counts toward the selected target
+interval; slow frames do not incur an additional fixed pause. **Stop camera**, leaving
 the prediction view, or hiding the tab ends capture; abandoned workers expire
 after 60 seconds without frames. Stop live prediction before running other jobs.
 
@@ -103,23 +106,40 @@ Refreshing the page alone updates browser files but does not reload Python route
 
 Camera frames travel only to the local dashboard worker and are not written to
 disk. The preview is mirrored visually; input pixels remain unmirrored. Held
-poses repeat the current landmarks to 32 frames; rolling mode interpolates the
-last two seconds using capture timestamps. Perform once interpolates the entire
-captured interval to 32 frames, retaining up to 600 ms before movement onset.
+poses repeat the current landmarks to 32 frames. Both movement modes interpolate
+the entire captured interval to 32 frames, retaining up to 600 ms before movement
+onset. The former two-second rolling window no longer discards early transitions
+or replaces completed gestures with their held ending poses.
 No inference augmentation is applied. Scores below 60% show uncertainty.
 
+The **Recognition timing** sliders remain editable while the camera runs:
+**Stillness delay** and **Hands missing delay** range from 100 to 2,000 ms,
+and **Frame interval** ranges from 20 to 500 ms. Defaults are 600, 400, and
+50 ms respectively. Changes apply on the next camera frame, keeping the same
+worker, loaded model, and capture buffer. The finish delays apply to both
+movement modes; frame interval applies to every mode. Lower finish delays
+respond sooner but can end capture during pauses or tracking gaps. Actual frame
+rate depends on processing speed. Settings remain selected across camera stops
+and starts within the page; reloading the page restores defaults.
+
 Automatic capture starts after two consecutive moving frames and finishes after
-800 ms of stillness or 600 ms without detected hands. Brief missing-hand frames
+600 ms of stillness or 400 ms without detected hands by default. Brief missing-hand frames
 stay zero-filled within the sequence. Motion uses mean XY landmark displacement
 per second (threshold 0.04 in image-normalized units); movement must accumulate
 at least 0.025 image units. These are initial heuristics, not learned gesture
 boundaries. A pause within a gesture can end capture early; camera shake can
 trigger capture. Keep the camera steady and use **Next gesture** to retry.
-Captures exceeding six seconds or the 256-frame limit are rejected without
+Captures exceeding six seconds or the 512-frame limit are rejected without
 classifying a truncated sequence. A frame-delivery pause longer than one second
-resets an unfinished capture. Completed results remain held until reset or stop.
+resets an unfinished capture. Perform once holds its result until reset or stop.
+Moving gesture holds the result while waiting, then clears it when the next
+movement starts.
 
-Missing hands clear the rolling window and held-pose predictions as before.
+In movement modes, missing-hand frames remain in the active capture. A gap
+shorter than the selected Hands missing delay can resume the same gesture; once
+that delay expires, the retained sequence is classified and its result remains
+visible even with no hands.
+Held-pose predictions still clear immediately when no hand is detected.
 Webcam accuracy and automatic boundaries must be evaluated separately from the
 prepared test split; physical camera interaction has not been manually verified
 by the agent. Capture changes do not repair the saved greetings checkpoint's

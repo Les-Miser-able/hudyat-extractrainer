@@ -240,6 +240,21 @@ class DashboardHTTPTests(unittest.TestCase):
         self.assertEqual(self.request("/api/jobs", [], {"X-Dashboard-Token": "test-token"})[0], 400)
         self.assertEqual(self.server.jobs.snapshot(), [])
 
+    def test_live_timing_updates_are_validated_before_worker_exchange(self):
+        headers = {"X-Dashboard-Token": "test-token"}
+        image = "data:image/jpeg;base64,fixture"
+        request = {"session": "fixture", "image": image, "timestamp": 50,
+                   "timing": {"settle_ms": 250, "missing_ms": 900}}
+        with patch.object(self.server.live, "frame", return_value={"status": "capturing"}) as frame:
+            self.assertEqual(self.request('/api/live/frame', request, headers)[0], 200)
+            frame.assert_called_once_with("fixture", image, 50., timing=request['timing'])
+            frame.reset_mock()
+            for invalid in ({"settle_ms": True}, {"missing_ms": 99}, {"settle_ms": 2001},
+                            {"missing_ms": 200.5}, {"missing_ms": "400"}, {"unknown": 100}, []):
+                with self.subTest(invalid=invalid):
+                    self.assertEqual(self.request('/api/live/frame', {**request, 'timing': invalid}, headers)[0], 400)
+            frame.assert_not_called()
+
     def test_live_endpoints_validate_paths_and_forward_frames(self):
         root = Path(self.temp.name)
         run = root / "runs" / "colors" / "live_fixture"
