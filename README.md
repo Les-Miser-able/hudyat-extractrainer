@@ -72,6 +72,22 @@ dataset; **Validate dataset** performs the full trainer check.
 The dashboard starts one job at a time and binds only to loopback. Activity history
 is held in memory until restart; generated artifacts remain in the usual folders.
 
+**Model runs → Model comparison** shows each saved run's recorded dataset,
+source folders, original/prepared sample counts, training and augmentation
+parameters, offline metrics, and your recorded live settings. Filter by category
+or **Preferred only**; class lists are available in each model row. Missing
+metadata is shown as —, and live settings remain blank until recorded.
+
+Choose **Edit record** to mark a run Not tested, Testing, Preferred, or Rejected
+and save notes, tested delays, mode, trial counts, recognition time, date, and
+device/session. There is one preferred run per category: selecting another moves
+the previous choice back to Testing while keeping its notes. **Try model** opens
+prediction with that run and restores its recorded mode and slider values.
+**Record current settings**, beside the camera controls, saves the selected
+model's mode and current sliders without interrupting an active capture.
+These manual records persist in `runs/model_records.json` across dashboard
+restarts. They do not change checkpoints, training data, or saved test metrics.
+
 The existing [FSL Pocket webcam app](pwa-sample/README.md) remains available
 separately. Its setup/export workflow is unchanged.
 

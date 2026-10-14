@@ -1,5 +1,26 @@
 # Verification
 
+## In-dashboard model comparison and manual records — 2026-10-14
+
+- Expanded Model runs into a comparison table with saved dataset/source details,
+  distinct originals and prepared split counts, training/preparation parameters,
+  class coverage, offline scores, recorded live timings, and editable notes.
+- Manual decisions and live observations persist atomically in
+  runs/model_records.json. Selecting Preferred replaces the previous preferred
+  run in the same category without discarding its notes. Unknown runs and invalid
+  fields are rejected. An unreadable record file is not silently overwritten.
+- Record current settings saves the camera mode/sliders without interrupting a
+  live session. Try model restores recorded settings. A stale project refresh
+  cannot overwrite a newer saved record in the UI.
+- All 54 dashboard Python and 26 JavaScript tests passed. Checks cover persistence,
+  preferred selection, zero-correct trials, invalid input, failed atomic writes,
+  unchanged checkpoints/metrics, HTTP token validation, escaped notes, filtering,
+  record editing, settings capture/restoration, and refresh ordering.
+- Read-only inspection loaded all 14 real saved runs, including legacy CSV epoch
+  history and distinct original source counts for recent runs. No manual choices
+  were made for the user's real runs. Browser/native surfaces were unavailable
+  for visual verification; physical camera recognition was not re-evaluated.
+
 ## Live recognition timing sliders — 2026-10-14
 
 - Added editable sliders for Stillness delay (100–2,000 ms), Hands missing

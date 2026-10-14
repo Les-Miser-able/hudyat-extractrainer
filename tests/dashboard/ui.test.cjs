@@ -13,7 +13,7 @@ function dashboard() {
       value: '', textContent: '', hidden: false, disabled: false,
       addEventListener(name, handler) { (this.handlers ??= {})[name] = handler; }, classList: {toggle() {}},
       querySelector: () => node(`${id}-submit`),
-      replaceChildren() { this.innerHTML = ''; },
+      replaceChildren() { this.innerHTML = ''; }, scrollIntoView() {},
       querySelectorAll: () => [], elements: {category: {value: 'alphabet',
         addEventListener(name, handler) { (this.handlers ??= {})[name] = handler; }}, hand_model: {value: ''}}
     });
@@ -398,4 +398,91 @@ test('timing sliders change labels and subsequent camera requests without resett
   assert.equal(requests.filter(([url]) => url.endsWith('/reset')).length, 0);
   assert.equal(app.run('liveSession'), 'fixture');
   await app.run('stopLive()');
+});
+
+
+test('model comparison shows provenance and escapes user notes, with manual preferred filtering', () => {
+  const app = dashboard();
+  app.run("state.runs = [{id:'runs/greetings/a',name:'a',category:'greetings',classes:2,class_labels:['afternoon','evening'],accuracy:.9,checkpoint:true,metadata:{dataset:'dataset-v1',split_counts:{train:18,test:4},training:{batch_size:32,learning_rate:.001},preparation:{video_extra_samples:8}}},{id:'runs/colors/b',name:'b',category:'colors',classes:4}]; state.model_records = {'runs/greetings/a':{decision:'Preferred',notes:'<img src=x onerror=bad()>',settle_ms:700,missing_ms:450,frame_interval_ms:50}}; renderRuns();");
+  assert.match(app.node('all-runs').innerHTML, /dataset-v1/);
+  assert.match(app.node('all-runs').innerHTML, /700 ms/);
+  assert.match(app.node('all-runs').innerHTML, /&lt;img/);
+  assert.doesNotMatch(app.node('all-runs').innerHTML, /<img/);
+  app.node('run-preferred-only').checked = true;
+  app.run('renderRuns()');
+  assert.ok(app.node('all-runs').innerHTML.includes('runs/greetings/a'));
+  assert.ok(!app.node('all-runs').innerHTML.includes('runs/colors/b'));
+});
+
+test('saving a model record keeps blank timings unknown and records zero correct trials', async () => {
+  const app = dashboard();
+  app.run("state.runs = [{id:'runs/greetings/a',name:'a',category:'greetings',checkpoint:true}]; editModelRecord('runs/greetings/a');");
+  app.node('record-decision').value = 'Preferred';
+  app.node('record-live_trials').value = '10';
+  app.node('record-live_correct').value = '0';
+  app.node('record-notes').value = 'Confuses evening';
+  const requests = [];
+  app.context.fetch = async (url, options) => {
+    const payload = JSON.parse(options.body); requests.push([url,payload]);
+    return {ok:true,json:async()=>({model_records:{[payload.run]:payload}})};
+  };
+  await app.run('saveModelRecord()');
+  assert.equal(requests[0][0], '/api/model-record');
+  assert.equal(requests[0][1].live_correct, 0);
+  assert.equal(requests[0][1].settle_ms, null);
+  assert.equal(app.run("modelRecord('runs/greetings/a').decision"), 'Preferred');
+  assert.match(app.node('predict-run').innerHTML, /Preferred/);
+});
+
+test('a failed record save preserves the draft and displays the server error', async () => {
+  const app = dashboard();
+  app.run("state.runs = [{id:'runs/greetings/a',name:'a',category:'greetings'}]; editModelRecord('runs/greetings/a');");
+  app.node('record-notes').value = 'Keep this draft';
+  app.context.fetch = async () => ({ok:false,json:async()=>({error:'Could not save record'})});
+  await app.run('saveModelRecord()');
+  assert.equal(app.node('record-notes').value, 'Keep this draft');
+  assert.equal(app.node('model-record-error').hidden, false);
+  assert.equal(app.node('model-record-error').textContent, 'Could not save record');
+});
+
+test('recording current camera settings preserves the active capture session', async () => {
+  const app = dashboard(); camera(app);
+  app.run("state.runs = [{id:'runs/colors/first',name:'first',category:'colors',checkpoint:true}]; liveActive=true; liveSession='fixture';");
+  app.node('live-settle-ms').value = '700'; app.node('live-missing-ms').value = '450';
+  app.node('live-frame-ms').value = '80';
+  const requests=[];
+  app.context.fetch=async(url,options)=>{const payload=JSON.parse(options.body);requests.push([url,payload]);return{ok:true,json:async()=>({model_records:{[payload.run]:payload}})};};
+  await app.run('recordCameraSettings()');
+  assert.equal(app.run('liveSession'), 'fixture');
+  assert.equal(app.run('liveActive'), true);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0][1].frame_interval_ms, 80);
+  assert.equal(requests[0][1].missing_ms, 450);
+});
+
+test('trying a model restores its recorded timing and mode', async () => {
+  const app = dashboard();
+  app.run("state.runs=[{id:'runs/greetings/a',checkpoint:true}]; state.model_records={'runs/greetings/a':{mode:'motion',settle_ms:700,missing_ms:450,frame_interval_ms:80}};");
+  await app.run("useRecordedRun('runs/greetings/a')");
+  assert.equal(app.node('predict-run').value, 'runs/greetings/a');
+  assert.equal(app.node('live-mode').value, 'motion');
+  assert.equal(Number(app.node('live-missing-ms').value), 450);
+  assert.equal(app.node('live-frame-value').textContent, '80 ms');
+  assert.equal(app.context.location.hash, 'predict');
+});
+
+
+test('a stale project refresh cannot replace a model record saved while it was pending', async () => {
+  const app=dashboard();
+  app.run("state.runs=[{id:'runs/greetings/a',name:'a',category:'greetings',checkpoint:true}];");
+  let finishScan;
+  app.context.fetch=async(url,options)=>url.startsWith('/api/state')
+    ? new Promise(resolve=>{finishScan=resolve;})
+    : {ok:true,json:async()=>({model_records:{'runs/greetings/a':{decision:'Preferred'}}})};
+  const pending=app.run('scan()');
+  await app.run("persistModelRecord({run:'runs/greetings/a',decision:'Preferred'})");
+  finishScan({ok:true,json:async()=>({categories:[],runs:[{id:'runs/greetings/a',name:'a',category:'greetings',checkpoint:true}],model_records:{},token:'test-token',python:'test'})});
+  await pending;
+  assert.equal(app.run("modelRecord('runs/greetings/a').decision"),'Preferred');
+  assert.match(app.node('all-runs').innerHTML,/Preferred/);
 });

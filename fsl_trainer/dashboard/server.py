@@ -22,6 +22,7 @@ from ..data.source_selection import SUPPORTED, VIDEO_EXTENSIONS, source_files, f
 from ..data.dataset_paths import dataset_name, prepared_datasets, select_dataset
 from .live import LiveInference
 from .timing import capture_timing
+from .model_records import run_metadata, read_records, save_record
 
 BASE = PROJECT_ROOT
 UI = Path(__file__).resolve().parent / "ui"
@@ -141,7 +142,8 @@ def runs():
             metrics = read_json(run / "test_metrics.json", {})
             classes = read_json(run / "classes.json", [])
             rows.append({"id": run.relative_to(BASE).as_posix(), "name": run.name,
-                         "category": category.name, "classes": len(classes),
+                         "category": category.name, "classes": len(classes), "class_labels": classes,
+                         "metadata": run_metadata(run),
                          "accuracy": metrics.get("accuracy"), "f1": metrics.get("macro_f1"),
                          "complete": (run / "test_metrics.json").is_file(),
                          "checkpoint": (run / "best.keras").is_file(),
@@ -350,7 +352,7 @@ class Handler(BaseHTTPRequestHandler):
             if url.path == "/api/state":
                 return self.reply({"categories": inventory(query.get("data", ["data"])[0],
                                                           query.get("datasets", ["datasets_augmented"])[0]),
-                                   "runs": runs(), "token": self.server.token,
+                                   "runs": runs(), "model_records": read_records(BASE), "token": self.server.token,
                                    "python": sys.version.split()[0]})
             if url.path == "/api/jobs":
                 return self.reply(self.server.jobs.snapshot())
@@ -393,6 +395,8 @@ class Handler(BaseHTTPRequestHandler):
             data = json.loads(self.rfile.read(size))
             if not isinstance(data, dict):
                 raise ValueError("Expected a JSON object.")
+            if self.path == "/api/model-record":
+                return self.reply({"model_records": save_record(BASE, data, runs())})
             if self.path == "/api/live/start":
                 run = local_path(data.get("run"))
                 if BASE / "runs" not in run.parents or not (run / "best.keras").is_file():

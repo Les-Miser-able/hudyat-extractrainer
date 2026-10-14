@@ -255,6 +255,24 @@ class DashboardHTTPTests(unittest.TestCase):
                     self.assertEqual(self.request('/api/live/frame', {**request, 'timing': invalid}, headers)[0], 400)
             frame.assert_not_called()
 
+    def test_model_record_endpoint_persists_manual_choices_and_rejects_unknown_runs(self):
+        run = Path(self.temp.name) / 'runs/greetings/record_fixture'
+        run.mkdir(parents=True, exist_ok=True)
+        (run / 'classes.json').write_text('["good_afternoon", "good_evening"]')
+        (run / 'best.keras').write_bytes(b'checkpoint')
+        headers = {'X-Dashboard-Token': 'test-token'}
+        payload = {'run': 'runs/greetings/record_fixture', 'decision': 'Preferred',
+                   'settle_ms': 700, 'missing_ms': 450, 'frame_interval_ms': 50, 'notes': 'Live-tested'}
+        status, body = self.request('/api/model-record', payload, headers)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)['model_records'][payload['run']]['notes'], 'Live-tested')
+        state = json.loads(self.request('/api/state')[1])
+        self.assertEqual(state['model_records'][payload['run']]['decision'], 'Preferred')
+        self.assertEqual((run / 'best.keras').read_bytes(), b'checkpoint')
+        self.assertEqual(self.request('/api/model-record', payload)[0], 403)
+        self.assertEqual(self.request('/api/model-record', {**payload, 'run': '../outside'}, headers)[0], 400)
+        self.assertEqual(self.request('/api/model-record', {**payload, 'missing_ms': False}, headers)[0], 400)
+
     def test_live_endpoints_validate_paths_and_forward_frames(self):
         root = Path(self.temp.name)
         run = root / "runs" / "colors" / "live_fixture"

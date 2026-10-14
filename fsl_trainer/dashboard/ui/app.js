@@ -7,6 +7,7 @@ const title = value => value.charAt(0).toUpperCase() + value.slice(1).replaceAll
 let state = {categories: [], runs: []}, jobs = [], token = '', selectedRun = '', polling = false, loading = false, submitting = false;
 let scanVersion = 0, runVersion = 0, previousJobStatus = '';
 let folderCategory = '';
+let modelRecordsVersion = 0;
 let liveStream = null, liveSession = '', liveActive = false, liveVersion = 0, liveTimer = null;
 let liveCaptureVersion = 0, liveResetting = false;
 
@@ -20,6 +21,9 @@ async function api(path, body) {
     method: 'POST', headers: {'Content-Type': 'application/json', 'X-Dashboard-Token': token}, body: JSON.stringify(body)
   });
   const result = await response.json();
+  if (response.status === 404 && path === '/api/model-record') {
+    throw new Error('Restart dashboard.py and refresh the page to enable saved model records.');
+  }
   if (response.status === 404 && path.startsWith('/api/live/')) {
     throw new Error('Live prediction is unavailable in the running server. Finish any running job, restart dashboard.py, then refresh this page.');
   }
@@ -60,7 +64,7 @@ function render() {
   $('category-list').innerHTML = categories.length ? categories.map(c => `<div class="category-row"><span class="category-icon" aria-hidden="true">${escapeHTML(c.name[0].toUpperCase())}</span><div><div class="category-name">${escapeHTML(title(c.name))}</div><div class="category-meta">${fmt(c.classes.length)} gestures <span>·</span> ${fmt(c.samples)} samples</div></div><span class="tag ${c.prepared ? 'ready' : ''}">${c.prepared ? 'Prepared' : c.samples ? 'Raw samples' : 'Awaiting data'}</span></div>`).join('') : empty('No categories found. Add source folders in your selected source root.');
   document.querySelectorAll('.category-select').forEach(select => populate(select, categories.map(c => [c.name, title(c.name)]), 'No categories found'));
   populate($('run-filter'), [['', 'All categories'], ...[...new Set(state.runs.map(r => r.category))].map(c => [c, title(c)])], 'All categories');
-  populate($('predict-run'), state.runs.filter(r => r.checkpoint).map(r => [r.id, `${title(r.category)} / ${r.name}`]), 'No trained checkpoints found');
+  renderPredictRuns();
   $('environment').textContent = `Python ${state.python} · Local processing`;
   $('recent-runs').innerHTML = runTable(state.runs.slice(0, 4));
   renderSourceFolders(); renderTrainingDatasets(); renderDatasets(); renderRuns(); controls();
@@ -105,9 +109,107 @@ function runTable(rows) {
   if (!rows.length) return empty('No runs here yet. Prepare a dataset and start your first training run.');
   return `<table><thead><tr><th>RUN NAME</th><th>CATEGORY</th><th>TEST ACCURACY</th><th>MACRO F1</th><th>STATUS</th><th><span class="sr-only">Open run</span></th></tr></thead><tbody>${rows.map(r => `<tr><td class="run-name"><button class="run-link" data-run="${escapeHTML(r.id)}">${escapeHTML(r.name)}</button></td><td><span class="mini-category">${escapeHTML(title(r.category))}</span></td><td class="metric">${percent(r.accuracy)}</td><td>${percent(r.f1)}</td><td><span class="tag ${r.complete ? 'completed' : ''}">${r.complete ? 'Completed' : 'Incomplete'}</span></td><td><button class="run-link table-arrow" data-run="${escapeHTML(r.id)}" aria-label="View ${escapeHTML(r.name)}">↗</button></td></tr>`).join('')}</tbody></table>`;
 }
+function modelRecord(id) {
+  return state.model_records?.[id] || {};
+}
+function recordValue(value) {
+  return value === null || value === undefined ? '—' : escapeHTML(value);
+}
+function recordPercent(value) {
+  return typeof value === 'number' && Number.isFinite(value) ? `${(value * 100).toFixed(2)}%` : '—';
+}
+function renderPredictRuns() {
+  populate($('predict-run'), state.runs.filter(r => r.checkpoint).map(r => [r.id,
+    `${title(r.category)} / ${r.name}${modelRecord(r.id).decision === 'Preferred' ? ' · Preferred' : ''}`]), 'No trained checkpoints found');
+}
+function modelRecordsTable(rows) {
+  if (!rows.length) return empty('No matching saved models. Change the filters or train a model first.');
+  return `<table class="model-record-table"><thead><tr><th>Model</th><th>Decision</th><th>Data used</th><th>Training and preparation</th><th>Offline evaluation</th><th>Recorded live settings</th><th>Notes</th><th>Actions</th></tr></thead><tbody>${rows.map(r => {
+    const record = modelRecord(r.id), m = r.metadata || {}, t = m.training || {}, p = m.preparation || {}, counts = m.split_counts || {};
+    const folders = Array.isArray(m.source_folders) ? m.source_folders.join(', ') : 'Not recorded';
+    const mode = {motion: 'Moving gesture', gesture: 'Perform once', pose: 'Held pose'}[record.mode] || 'Not recorded';
+    const liveAccuracy = record.live_trials && record.live_correct != null ? record.live_correct / record.live_trials : null;
+    return `<tr><td><button class="run-link" data-run="${escapeHTML(r.id)}">${escapeHTML(r.name)}</button><small>${escapeHTML(title(r.category))}</small><details><summary>${fmt(r.classes)} classes</summary><span>${escapeHTML((r.class_labels || []).join(', ') || 'Class labels unavailable')}</span></details></td>
+    <td><span class="tag ${record.decision === 'Preferred' ? 'ready' : ''}">${escapeHTML(record.decision || 'Not tested')}</span></td>
+    <td><span class="record-dataset">${escapeHTML(m.dataset || 'Dataset not recorded')}</span><small>Folders: ${escapeHTML(folders)}${m.input_kind ? ` · ${escapeHTML(m.input_kind)}` : ''}</small><small>Originals: ${recordValue(m.original_sources)} · Selected: ${recordValue(m.selected_sources)}</small><small>Train / validation / test: ${recordValue(counts.train)} / ${recordValue(counts.validation)} / ${recordValue(counts.test)}</small></td>
+    <td><span>Epochs recorded / max: ${recordValue(m.epochs_recorded)} / ${recordValue(t.epochs)}</span><small>Batch: ${recordValue(t.batch_size)} · LR: ${recordValue(t.learning_rate)}</small><small>Patience: ${recordValue(t.patience)} · Seed: ${recordValue(t.seed)}</small><small>Class weights: ${t.class_weights == null ? '—' : t.class_weights ? 'Yes' : 'No'}</small><small>Static variants (images): ${recordValue(p.static_variants)} · Jitter: ${recordValue(p.jitter_std)}</small><small>Video extras: ${recordValue(p.video_extra_samples)} · Warp: ${recordValue(p.video_time_warp)}</small><small>Detection confidence: ${recordValue(p.detection_confidence)}</small>${t.resume_from ? `<small>Resumed: ${escapeHTML(t.resume_from)}</small>` : ''}</td>
+    <td><strong>${recordPercent(r.accuracy)}</strong><small>Test accuracy</small><small>Macro F1: ${recordPercent(r.f1)}</small></td>
+    <td><span>${escapeHTML(mode)}</span><small>Stillness: ${recordValue(record.settle_ms)} ms</small><small>Hands missing: ${recordValue(record.missing_ms)} ms</small><small>Frame interval: ${recordValue(record.frame_interval_ms)} ms</small><small>Live accuracy: ${recordPercent(liveAccuracy)}</small>${record.live_trials ? `<small>${recordValue(record.live_correct)} / ${recordValue(record.live_trials)} correct</small>` : ''}<small>Response: ${recordValue(record.response_ms)} ms</small>${record.tested_on ? `<small>Tested: ${escapeHTML(record.tested_on)}</small>` : ''}</td>
+    <td><div class="record-notes">${escapeHTML(record.notes || 'No notes yet.')}</div>${record.device ? `<small>Device / session: ${escapeHTML(record.device)}</small>` : ''}</td>
+    <td><div class="record-actions"><button type="button" class="button secondary" data-record-run="${escapeHTML(r.id)}">Edit record</button><button type="button" class="button secondary" data-test-run="${escapeHTML(r.id)}" ${r.checkpoint ? '' : 'disabled'}>Try model</button></div></td></tr>`;
+  }).join('')}</tbody></table>`;
+}
+let editingRecord = '', recordSaving = false;
+const recordFields = ['decision', 'mode', 'settle_ms', 'missing_ms', 'frame_interval_ms', 'live_trials', 'live_correct', 'response_ms', 'tested_on', 'device', 'notes'];
+const recordNumbers = ['settle_ms', 'missing_ms', 'frame_interval_ms', 'live_trials', 'live_correct', 'response_ms'];
+function editModelRecord(id) {
+  const run = state.runs.find(r => r.id === id);
+  if (!run) return;
+  editingRecord = id;
+  const record = modelRecord(id);
+  $('model-record-title').textContent = `Record: ${title(run.category)} / ${run.name}`;
+  for (const name of recordFields) $('record-' + name).value = record[name] ?? (name === 'decision' ? 'Not tested' : '');
+  $('model-record-error').hidden = true;
+  $('model-record-editor').hidden = false;
+  $('model-record-editor').scrollIntoView({behavior: 'smooth', block: 'start'});
+}
+async function persistModelRecord(payload) {
+  if (recordSaving) return false;
+  recordSaving = true; controls();
+  try {
+    const result = await api('/api/model-record', payload);
+    state.model_records = result.model_records;
+    ++modelRecordsVersion;
+    renderRuns(); renderPredictRuns();
+    return true;
+  } finally { recordSaving = false; controls(); }
+}
+async function saveModelRecord() {
+  if (!editingRecord || recordSaving) return;
+  const payload = {run: editingRecord};
+  for (const name of recordFields) {
+    const value = $('record-' + name).value;
+    payload[name] = recordNumbers.includes(name) ? (value === '' ? null : Number(value)) : value;
+  }
+  $('model-record-error').hidden = true;
+  try {
+    if (await persistModelRecord(payload)) notice('Model record saved. Preferred selections and notes will remain after restarting.');
+  } catch (error) {
+    $('model-record-error').textContent = error.message;
+    $('model-record-error').hidden = false;
+  }
+}
+function copyCameraSettings() {
+  const settings = {...liveTiming(), frame_interval_ms: liveFrameInterval(), mode: $('live-mode').value};
+  for (const [name, value] of Object.entries(settings)) $('record-' + name).value = value;
+}
+async function recordCameraSettings() {
+  const id = $('predict-run').value;
+  if (!id || recordSaving) return;
+  try {
+    if (await persistModelRecord({run: id, ...modelRecord(id), ...liveTiming(),
+      frame_interval_ms: liveFrameInterval(), mode: $('live-mode').value})) notice('Current camera settings recorded for the selected model. Review them under Model runs.');
+  } catch (error) { notice(error.message, true); }
+}
+async function useRecordedRun(id) {
+  if (!state.runs.some(r => r.id === id && r.checkpoint)) return;
+  if (liveActive) await stopLive();
+  const record = modelRecord(id);
+  $('predict-run').value = id;
+  if (record.mode) $('live-mode').value = record.mode;
+  for (const [name, control] of [['settle_ms','live-settle-ms'], ['missing_ms','live-missing-ms'], ['frame_interval_ms','live-frame-ms']]) {
+    if (record[name] != null) $(control).value = record[name];
+  }
+  renderLiveTiming(); controls();
+  location.hash = 'predict';
+}
 function renderRuns() {
   const filter = $('run-filter').value;
-  $('all-runs').innerHTML = runTable(state.runs.filter(r => !filter || r.category === filter));
+  const preferredOnly = $('run-preferred-only').checked;
+  const rows = state.runs.filter(r => (!filter || r.category === filter)
+    && (!preferredOnly || modelRecord(r.id).decision === 'Preferred'));
+  $('all-runs').innerHTML = modelRecordsTable(rows);
+  $('run-record-summary').textContent = `${rows.length} saved runs shown. Preferred models are selected manually, one per category.`;
 }
 function renderDatasets() {
   const search = $('category-search').value.toLowerCase();
@@ -117,10 +219,12 @@ function renderDatasets() {
 }
 async function scan() {
   const version = ++scanVersion;
+  const recordsVersion = modelRecordsVersion;
   loading = true; controls();
   try {
     const next = await api(`/api/state?data=${encodeURIComponent($('data-root').value)}&datasets=${encodeURIComponent($('dataset-root').value)}`);
     if (version !== scanVersion) return;
+    if (recordsVersion !== modelRecordsVersion) next.model_records = state.model_records;
     state = next; token = next.token; render();
   } catch (error) { notice(error.message, true); }
   finally { if (version === scanVersion) { loading = false; controls(); } }
@@ -136,6 +240,8 @@ function controls() {
   $('live-mode').disabled = liveActive;
   $('live-next').hidden = !['gesture', 'motion'].includes($('live-mode').value);
   $('live-next').disabled = !liveActive || !liveSession || liveResetting;
+  $('model-record-save').disabled = recordSaving || !token;
+  $('live-record').disabled = recordSaving || !token || !$('predict-run').value;
   const category = state.categories.find(c => c.name === $('prepare-form').elements.category.value);
   const selection = sourceSelection();
   const filtered = selection.source_folders !== null || selection.videos_only;
@@ -387,6 +493,10 @@ for (const [id, action] of [['prepare-form', 'prepare'], ['train-form', 'train']
   });
 }
 document.addEventListener('click', event => {
+  const record = event.target.closest('[data-record-run]');
+  if (record) editModelRecord(record.dataset.recordRun);
+  const tryRun = event.target.closest('[data-test-run]');
+  if (tryRun) useRecordedRun(tryRun.dataset.testRun);
   const run = event.target.closest('[data-run]');
   if (run) openRun(run.dataset.run);
   const prepare = event.target.closest('[data-prepare]');
@@ -406,6 +516,11 @@ $('source-folder-mode').addEventListener('change', controls);
 $('source-folder-options').addEventListener('change', controls);
 $('source-videos-only').addEventListener('change', controls);
 $('run-filter').addEventListener('change', renderRuns);
+$('run-preferred-only').addEventListener('change', renderRuns);
+$('model-record-form').addEventListener('submit', event => { event.preventDefault(); saveModelRecord(); });
+$('model-record-close').addEventListener('click', () => { $('model-record-editor').hidden = true; });
+$('model-record-copy').addEventListener('click', copyCameraSettings);
+$('live-record').addEventListener('click', recordCameraSettings);
 $('job-select').addEventListener('change', renderJob);
 $('cancel-job').addEventListener('click', async () => {
   $('cancel-job').disabled = true;
@@ -413,7 +528,7 @@ $('cancel-job').addEventListener('click', async () => {
   catch (error) { notice(error.message, true); }
   finally { $('cancel-job').disabled = false; }
 });
-$('use-run').addEventListener('click', () => { $('predict-run').value = selectedRun; location.hash = 'predict'; });
+$('use-run').addEventListener('click', () => useRecordedRun(selectedRun));
 $('predict-run').addEventListener('change', controls);
 $('live-start').addEventListener('click', startLive);
 $('live-stop').addEventListener('click', stopLive);
