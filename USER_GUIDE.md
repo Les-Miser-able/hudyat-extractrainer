@@ -84,31 +84,30 @@ Copy your files into this layout using File Explorer:
 
 ```text
 data/
-  raw/
-    alphabet/
-      A/
-        photo001.jpg
-        photo002.jpg
-        photo003.jpg
-      B/
-        photo001.jpg
-        photo002.jpg
-        photo003.jpg
-      J/
-        clip001.mp4
-        clip002.mp4
-        clip003.mp4
+  alphabet/
+    A/
+      photo001.jpg
+      photo002.jpg
+      photo003.jpg
+    B/
+      photo001.jpg
+      photo002.jpg
+      photo003.jpg
+    J/
+      clip001.mp4
+      clip002.mp4
+      clip003.mp4
 ```
 
-The folder immediately under `raw` is the category. The next folder is the correct
+The folder immediately under `data` is the category. The next folder is the correct
 label for every file inside it. To add `colors`, use folders such as
-`data/raw/colors/blue` and `data/raw/colors/red`.
+`data/colors/blue` and `data/colors/red`.
 
 - Use original JPG/PNG images or MP4 videos for the simplest workflow.
 - A category needs at least **two gesture folders**, each with at least **three independent source groups** remaining after preparation rejects unusable files. This is a processing minimum, not enough to establish recognition quality.
 - Renaming or copying one image several times does not create independent examples.
 - Keep hands visible. Use video to capture signs whose motion matters.
-- Keep all new originals under `data/raw`; do not put prepared or generated files there.
+- Keep all new originals under `data`; do not put prepared or generated files there.
 - If several files come from the same signer, session, or recording, read [Grouping related recordings](#grouping-related-recordings) before preparing them.
 
 There is no upload page. Adding data means copying it into these folders.
@@ -129,16 +128,16 @@ If you have already used `guide_v1`, choose a fresh name such as `guide_v2`.
 Run:
 
 ```powershell
-.\.venv\Scripts\python.exe categories.py prepare --category alphabet --datasets data/processed/guide_v1
+.\.venv\Scripts\python.exe categories.py prepare --category alphabet --dataset-name guide_v1
 ```
 
 This command:
 
-1. Reads originals from `data/raw/alphabet`.
+1. Reads originals from `data/alphabet`.
 2. Extracts hand landmarks and applies the existing preprocessing.
 3. Separates source groups into training, validation, and test sets.
 4. Converts each example into the model's 32-frame input format.
-5. Saves everything under `data/processed/guide_v1/alphabet`.
+5. Saves everything under `datasets_augmented/alphabet/guide_v1`.
 
 Images generate eight slightly varied landmark sequences by default. Videos are
 resampled to 32 frames. You do not need to run a separate normalization script.
@@ -151,22 +150,22 @@ long stages. A successful run ends with a completion message and an augmentation
 Check the prepared dataset:
 
 ```powershell
-.\.venv\Scripts\python.exe trainer.py inspect --dataset data/processed/guide_v1/alphabet
+.\.venv\Scripts\python.exe trainer.py inspect --dataset datasets_augmented/alphabet/guide_v1
 ```
 
 Expected result: sample counts for each class in each split, with no validation error.
 
 For raw-media inputs, review
-`data/processed/guide_v1/alphabet/extraction_report.json` if files were rejected.
+`datasets_augmented/alphabet/guide_v1/extraction_report.json` if files were rejected.
 It records accepted, rejected, and ignored inputs. A failed extraction may instead
-write a timestamped `alphabet.extraction-failed-....json` beside the output folder.
+write a timestamped `guide_v1.extraction-failed-....json` beside the output folder.
 
 ## 5. Train the model
 
 Use the **same dataset path** you used during preparation:
 
 ```powershell
-.\.venv\Scripts\python.exe categories.py train --category alphabet --datasets data/processed/guide_v1 --run guide_v1
+.\.venv\Scripts\python.exe categories.py train --category alphabet --dataset-name guide_v1 --run guide_v1
 ```
 
 The trainer saves results under `runs/alphabet/guide_v1`.
@@ -179,7 +178,7 @@ This is normal. Later runs can reuse it.
 For a **short pipeline check**, use a separate run name and fewer epochs:
 
 ```powershell
-.\.venv\Scripts\python.exe categories.py train --category alphabet --datasets data/processed/guide_v1 --run guide_check --epochs 2 --batch-size 16
+.\.venv\Scripts\python.exe categories.py train --category alphabet --dataset-name guide_v1 --run guide_check --epochs 2 --batch-size 16
 ```
 
 This checks that training works; it is not a substitute for training and evaluating
@@ -223,13 +222,13 @@ Keeping the entire run folder is the simplest way to preserve the results.
 Replace the sample path with a file that actually exists:
 
 ```powershell
-.\.venv\Scripts\python.exe trainer.py predict --run runs/alphabet/guide_v1 --sample "data/raw/alphabet/A/photo001.jpg"
+.\.venv\Scripts\python.exe trainer.py predict --run runs/alphabet/guide_v1 --sample "data/alphabet/A/photo001.jpg"
 ```
 
 For a video, use its filename instead:
 
 ```powershell
-.\.venv\Scripts\python.exe trainer.py predict --run runs/alphabet/guide_v1 --sample "data/raw/alphabet/J/clip001.mp4"
+.\.venv\Scripts\python.exe trainer.py predict --run runs/alphabet/guide_v1 --sample "data/alphabet/J/clip001.mp4"
 ```
 
 The command prints labels and their scores, highest first. A score of `0.85` is
@@ -323,12 +322,12 @@ If training used a custom hand detector, supply the same file with
 
 ### Add more data and train again
 
-Copy the new originals into the correct `data/raw` folders. Then prepare a new
+Copy the new originals into the correct `data` folders. Then prepare a new
 dataset version and train a new run:
 
 ```powershell
-.\.venv\Scripts\python.exe categories.py prepare --category alphabet --datasets data/processed/guide_v2
-.\.venv\Scripts\python.exe categories.py train --category alphabet --datasets data/processed/guide_v2 --run guide_v2
+.\.venv\Scripts\python.exe categories.py prepare --category alphabet --dataset-name guide_v2
+.\.venv\Scripts\python.exe categories.py train --category alphabet --dataset-name guide_v2 --run guide_v2
 ```
 
 Adding raw files does not update an existing prepared dataset, trained model, or
@@ -340,10 +339,10 @@ Old datasets and runs remain available for comparison.
 Skip preparation. For the migrated default dataset:
 
 ```powershell
-.\.venv\Scripts\python.exe categories.py train --category alphabet --datasets data/processed/default --run another_attempt
+.\.venv\Scripts\python.exe categories.py train --category alphabet --dataset-name prepared_v1 --run another_attempt
 ```
 
-For an augmented dataset, use `--datasets data/processed/augmented` instead.
+For an augmented dataset, use `--dataset-name augmented` instead.
 The folder name `augmented` does not turn on additional transforms; preparation
 options determine what was generated.
 
@@ -352,7 +351,7 @@ options determine what was generated.
 Use the same prepared dataset and a **new output run name**:
 
 ```powershell
-.\.venv\Scripts\python.exe categories.py train --category alphabet --datasets data/processed/guide_v1 --run guide_resumed --resume-from runs/alphabet/guide_v1/best.keras --epochs 20
+.\.venv\Scripts\python.exe categories.py train --category alphabet --dataset-name guide_v1 --run guide_resumed --resume-from runs/alphabet/guide_v1/best.keras --epochs 20
 ```
 
 This continues from the saved best checkpoint, including its optimizer state,
@@ -365,8 +364,8 @@ architecture must match. Only one category can be selected when resuming.
 Use an unused dataset version and run name:
 
 ```powershell
-.\.venv\Scripts\python.exe categories.py prepare --all --datasets data/processed/all_v1
-.\.venv\Scripts\python.exe categories.py train --all --datasets data/processed/all_v1 --run all_v1
+.\.venv\Scripts\python.exe categories.py prepare --all --dataset-name all_v1
+.\.venv\Scripts\python.exe categories.py train --all --dataset-name all_v1 --run all_v1
 ```
 
 Categories run one after another. Preparation skips empty source categories;
@@ -392,14 +391,14 @@ B/photo003.jpg,signer03
 ```
 
 Replace this example with **every supported source file in your category**, exactly
-once. Paths are relative to `data/raw/alphabet`. Include enough independent groups
+once. Paths are relative to `data/alphabet`. Include enough independent groups
 for every class to appear in all three splits.
 
 ```powershell
-.\.venv\Scripts\python.exe categories.py prepare --category alphabet --groups-dir groups --datasets data/processed/grouped_v1
+.\.venv\Scripts\python.exe categories.py prepare --category alphabet --groups-dir groups --dataset-name grouped_v1
 ```
 
-Train with `--datasets data/processed/grouped_v1`. Grouping is independent per category.
+Train with `--dataset-name grouped_v1`. Grouping is independent per category.
 
 ### Measure webcam recognition
 

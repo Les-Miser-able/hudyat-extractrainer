@@ -5,10 +5,10 @@ import json
 from pathlib import Path
 import subprocess
 import sys
-from .extraction import source_files
 from .augmentation_options import add_arguments, extra_samples, time_warp
-from .source_selection import add_arguments as add_source_arguments, folder_selection
+from .source_selection import add_arguments as add_source_arguments, folder_selection, source_files
 from ..paths import PROJECT_ROOT
+from .dataset_paths import dataset_name, select_dataset
 
 BASE = PROJECT_ROOT
 
@@ -39,6 +39,9 @@ def inventory(root):
 
 def build_jobs(args):
     preparing = args.command == "prepare"
+    version = getattr(args, "dataset_name", "prepared_v1" if preparing else None)
+    if preparing or (version is not None and version != "."):
+        version = dataset_name(version)
     if preparing:
         selected_folders = folder_selection(getattr(args, "source_folders", None))
         videos_only = getattr(args, "videos_only", False)
@@ -57,17 +60,19 @@ def build_jobs(args):
     jobs, skipped = [], []
     for name in selected:
         source = source_root / name
+        if not preparing:
+            source = select_dataset(source, version)
         has_data = (any(source_files(p, selected_folders, videos_only) for p in source.iterdir() if p.is_dir()) if preparing
-                    else (source / "manifest.json").is_file())
+                    else source is not None)
         if not has_data:
             if args.category:
                 raise ValueError(f"{name}: no {'images, videos or landmark samples' if preparing else 'prepared dataset'} found")
             skipped.append(name)
             continue
-        target = target_root / name if preparing else target_root / name / args.run
+        target = target_root / name / version if preparing else target_root / name / args.run
         if target.exists() and (not target.is_dir() or any(target.iterdir())):
             raise ValueError(f"Output already contains data: {target}. "
-                             "Choose another --datasets root or --run name.")
+                             "Choose another --dataset-name or --run name.")
         command = [sys.executable, "-B", str(BASE / "trainer.py")]
         if preparing:
             command += ["prepare", "--source", str(source), "--output", str(target),
@@ -141,7 +146,9 @@ def main():
         choice.add_argument("--category", action="append", type=category_name,
                             help="One category; repeat to select several")
         choice.add_argument("--all", action="store_true", help="Process every populated category")
-        cmd.add_argument("--datasets", default=str(BASE / "datasets"))
+        cmd.add_argument("--datasets", default=str(BASE / "datasets_augmented"))
+        cmd.add_argument("--dataset-name", default="prepared_v1" if action == "prepare" else None,
+                         help="Prepared folder under <datasets>/<category>; use . to train an original category-level dataset")
         cmd.add_argument("--seed", type=int, default=42)
         if action == "prepare":
             add_arguments(cmd)

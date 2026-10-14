@@ -46,7 +46,7 @@ function empty(text) { return `<div class="empty-state"><p>${escapeHTML(text)}</
 function populate(select, items, placeholder) {
   const previous = select.value;
   select.innerHTML = items.length ? items.map(([value, label]) => `<option value="${escapeHTML(value)}">${escapeHTML(label)}</option>`).join('') : `<option value="">${escapeHTML(placeholder)}</option>`;
-  if (items.some(([value]) => value === previous)) select.value = previous;
+  select.value = items.some(([value]) => value === previous) ? previous : (items[0]?.[0] || '');
 }
 function render() {
   const categories = state.categories;
@@ -62,9 +62,24 @@ function render() {
   populate($('run-filter'), [['', 'All categories'], ...[...new Set(state.runs.map(r => r.category))].map(c => [c, title(c)])], 'All categories');
   populate($('predict-run'), state.runs.filter(r => r.checkpoint).map(r => [r.id, `${title(r.category)} / ${r.name}`]), 'No trained checkpoints found');
   $('environment').textContent = `Python ${state.python} · Local processing`;
-  $('training-source').textContent = `Prepared datasets: ${$('dataset-root').value}/<category> · Output: runs/<category>/<run name>`;
   $('recent-runs').innerHTML = runTable(state.runs.slice(0, 4));
-  renderSourceFolders(); renderDatasets(); renderRuns(); controls();
+  renderSourceFolders(); renderTrainingDatasets(); renderDatasets(); renderRuns(); controls();
+}
+function preparedChoices() {
+  return state.categories.find(c => c.name === $('train-form').elements.category.value)?.datasets || [];
+}
+function renderTrainingDatasets() {
+  populate($('train-dataset'), preparedChoices().map(d => [d.path, d.name]), 'Prepare a dataset first');
+  controls();
+}
+function datasetPaths() {
+  const category = $('prepare-form').elements.category.value;
+  const name = $('dataset-name').value;
+  $('prepare-output').textContent = `Output: ${$('dataset-root').value}/${category || '<category>'}/${name || '<dataset name>'}`;
+  const selected = preparedChoices().find(d => d.path === $('train-dataset').value);
+  $('training-source').textContent = selected
+    ? `Dataset: ${selected.path} · Output: runs/${$('train-form').elements.category.value}/<run name>`
+    : 'Prepare a dataset, then select it here to train a model.';
 }
 function sourceSelection() {
   return {source_folders: $('source-folder-mode').value === 'selected'
@@ -97,7 +112,7 @@ function renderRuns() {
 function renderDatasets() {
   const search = $('category-search').value.toLowerCase();
   const rows = state.categories.filter(c => c.name.toLowerCase().includes(search));
-  $('dataset-list').innerHTML = rows.length ? rows.map(c => `<article class="dataset-item"><div class="dataset-item-heading"><div><span class="category-name">${escapeHTML(title(c.name))}</span><div class="category-meta">${fmt(c.samples)} sources · ${fmt(c.classes.length)} gesture folders${c.summary.total_output_sequences ? ` · ${fmt(c.summary.total_output_sequences)} prepared sequences` : ''}</div></div><span class="tag ${c.prepared ? 'ready' : ''}">${c.prepared ? 'Prepared' : 'Not prepared'}</span></div><div class="chips">${c.classes.map(g => `<span class="chip">${escapeHTML(g.name)} <small>${fmt(g.samples)}</small></span>`).join('') || '<span class="hint">No gesture folders yet.</span>'}</div><div class="dataset-actions"><button data-prepare="${escapeHTML(c.name)}">Prepare category ↗</button>${c.prepared ? `<button class="submit-job" style="width:auto;margin:0" data-inspect="${escapeHTML(c.name)}">Validate dataset ↗</button>` : ''}</div></article>`).join('') : empty('No matching categories. Check your source and dataset folders.');
+  $('dataset-list').innerHTML = rows.length ? rows.map(c => `<article class="dataset-item"><div class="dataset-item-heading"><div><span class="category-name">${escapeHTML(title(c.name))}</span><div class="category-meta">${fmt(c.samples)} sources · ${fmt(c.classes.length)} gesture folders · ${fmt(c.datasets?.length)} prepared datasets</div></div><span class="tag ${c.prepared ? 'ready' : ''}">${c.prepared ? 'Prepared' : 'Not prepared'}</span></div><div class="chips">${c.classes.map(g => `<span class="chip">${escapeHTML(g.name)} <small>${fmt(g.samples)}</small></span>`).join('') || '<span class="hint">No gesture folders yet.</span>'}</div>${(c.datasets || []).map(d => `<div class="dataset-version"><div><strong>${escapeHTML(d.name)}</strong><p class="hint">${escapeHTML(d.path)}${d.summary.total_output_sequences ? ` · ${fmt(d.summary.total_output_sequences)} prepared sequences` : ''}</p></div><button class="button secondary submit-job" type="button" data-inspect="${escapeHTML(c.name)}" data-dataset="${escapeHTML(d.path)}">Validate dataset ↗</button></div>`).join('')}<div class="dataset-actions"><button data-prepare="${escapeHTML(c.name)}">Prepare another dataset ↗</button></div></article>`).join('') : empty('No matching categories. Check your source and dataset folders.');
   controls();
 }
 async function scan() {
@@ -113,6 +128,8 @@ async function scan() {
 function controls() {
   const active = jobs.some(j => j.status === 'running');
   document.querySelectorAll('.submit-job').forEach(b => { b.disabled = loading || submitting || active || liveActive || !token; });
+  $('train-form').querySelector('[type="submit"]').disabled ||= !preparedChoices().some(d => d.path === $('train-dataset').value);
+  datasetPaths();
   $('live-start').disabled = loading || submitting || active || liveActive || !token || !$('predict-run').value;
   $('live-stop').disabled = !liveActive;
   $('predict-run').disabled = liveActive;
@@ -167,7 +184,7 @@ function renderJob() {
   const log = $('job-log'), nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 65;
   $('job-state').textContent = title(job.status);
   $('job-state').className = `tag ${job.status}`;
-  $('job-description').textContent = `${title(job.action)} · ${job.category} · Started ${job.started.replace('T', ' ')}${job.exit_code !== null ? ` · Exit ${job.exit_code}` : ''}`;
+  $('job-description').textContent = `${title(job.action)} · ${job.category}${job.dataset ? ` · ${job.dataset}` : ''} · Started ${job.started.replace('T', ' ')}${job.exit_code !== null ? ` · Exit ${job.exit_code}` : ''}`;
   const content = `${job.command}\n\n${job.logs.join('\n') || 'Starting worker…'}`;
   if (log.textContent !== content) { log.textContent = content; if (nearBottom) log.scrollTop = log.scrollHeight; }
   $('cancel-job').hidden = job.status !== 'running';
@@ -349,7 +366,7 @@ for (const [id, action] of [['prepare-form', 'prepare'], ['train-form', 'train']
   $(id).addEventListener('submit', event => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.currentTarget));
-    event.currentTarget.querySelectorAll('[type="checkbox"]').forEach(input => { data[input.name] = input.checked; });
+    event.currentTarget.querySelectorAll('[type="checkbox"][name]').forEach(input => { data[input.name] = input.checked; });
     startJob({action, ...data});
   });
 }
@@ -359,12 +376,16 @@ document.addEventListener('click', event => {
   const prepare = event.target.closest('[data-prepare]');
   if (prepare) { $('prepare-form').elements.category.value = prepare.dataset.prepare; renderSourceFolders(); controls(); $('prepare-form').scrollIntoView({behavior: 'smooth', block: 'center'}); }
   const inspect = event.target.closest('[data-inspect]');
-  if (inspect) startJob({action: 'inspect', category: inspect.dataset.inspect});
+  if (inspect) startJob({action: 'inspect', category: inspect.dataset.inspect, dataset: inspect.dataset.dataset});
 });
 $('refresh').addEventListener('click', () => { notice(''); scan(); pollJobs(); });
 $('scan-folders').addEventListener('click', () => { notice(''); scan(); });
 $('category-search').addEventListener('input', renderDatasets);
 $('prepare-form').elements.category.addEventListener('change', () => { $('prepare-error').hidden = true; renderSourceFolders(); controls(); });
+$('dataset-name').addEventListener('input', () => { $('prepare-error').hidden = true; datasetPaths(); });
+$('dataset-root').addEventListener('input', datasetPaths);
+$('train-form').elements.category.addEventListener('change', renderTrainingDatasets);
+$('train-dataset').addEventListener('change', controls);
 $('source-folder-mode').addEventListener('change', controls);
 $('source-folder-options').addEventListener('change', controls);
 $('source-videos-only').addEventListener('change', controls);
@@ -391,6 +412,7 @@ window.addEventListener('pagehide', () => {
 document.addEventListener('visibilitychange', () => { if (document.hidden && liveActive) stopLive(); });
 window.addEventListener('hashchange', route);
 $('run-name').value = `run-${new Date().toISOString().replace(/[-:]/g, '').slice(0, 15).replace('T', '-')}`;
+$('dataset-name').value = `dataset-${new Date().toISOString().replace(/[-:]/g, '').slice(0, 15).replace('T', '-')}`;
 route();
 scan().then(pollJobs);
 setInterval(() => { if (!document.hidden) pollJobs(); }, 2000);

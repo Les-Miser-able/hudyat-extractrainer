@@ -157,14 +157,43 @@ class VideoAugmentationTests(unittest.TestCase):
             self.sources(root / "data")
             command = [sys.executable, "-B", str(PROJECT_ROOT / "categories.py"), "prepare",
                        "--data", str(root / "data"), "--category", "raw",
-                       "--datasets", str(root / "datasets"), "--video-extra-samples", "3",
+                       "--datasets", str(root / "datasets"), "--dataset-name", "timing_v2", "--video-extra-samples", "3",
                        "--video-time-warp", ".05"]
             result = subprocess.run(command, cwd=root, capture_output=True, text=True, timeout=30)
             self.assertEqual(result.returncode, 0, result.stderr)
-            metadata = json.loads((root / "datasets" / "raw" / "preprocessing.json").read_text())
+            metadata = json.loads((root / "datasets" / "raw" / "timing_v2" / "preprocessing.json").read_text())
             self.assertEqual(metadata["video_augmentation"]["extra_samples"], 3)
             self.assertEqual(metadata["video_augmentation"]["max_displacement"], .05)
-            self.assertEqual(len(json.loads((root / "datasets" / "raw" / "manifest.json").read_text())), 12)
+            self.assertEqual(len(json.loads((root / "datasets" / "raw" / "timing_v2" / "manifest.json").read_text())), 12)
+
+    def test_named_dataset_and_original_keep_independent_manifests_and_caches(self):
+        from fsl_trainer.data.dataset_paths import prepared_datasets
+        from fsl_trainer.training.cache import open_cache
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sources(root / 'data')
+            original = root / 'datasets' / 'raw'
+            self.prepare(source, original)
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                original_cache = open_cache(original)[0]
+            before = {p.relative_to(original): p.read_bytes() for p in original.rglob('*') if p.is_file()}
+            command = [sys.executable, '-B', str(PROJECT_ROOT / 'categories.py'), 'prepare',
+                       '--data', str(root / 'data'), '--category', 'raw', '--datasets', str(root / 'datasets'),
+                       '--dataset-name', 'augmented v2', '--video-extra-samples', '3']
+            result = subprocess.run(command, cwd=root, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            named = original / 'augmented v2'
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(len(t.inspect_dataset(original)[0]), 6)
+                self.assertEqual(len(t.inspect_dataset(named)[0]), 12)
+                named_cache = open_cache(named)[0]
+                self.assertEqual(open_cache(original)[0], original_cache)
+            self.assertEqual(original_cache.parent, original / '_training_cache')
+            self.assertEqual(named_cache.parent, named / '_training_cache')
+            self.assertEqual(prepared_datasets(original), [original, named])
+            for path, contents in before.items():
+                self.assertEqual((original / path).read_bytes(), contents, str(path))
 
 
     def test_two_frame_inputs_keep_hand_slots_and_binary_presence(self):

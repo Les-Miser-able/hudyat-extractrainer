@@ -1,5 +1,26 @@
 # Verification
 
+## Named prepared datasets — 2026-10-14
+
+- Dashboard preparation now targets `<dataset root>/<category>/<dataset name>`.
+  The dashboard and category CLI share named/legacy dataset discovery. Training
+  and validation pass the selected dataset directory to the existing trainer;
+  prediction continues to use the selected run's preprocessing metadata.
+- Passed 34 dashboard Python checks, 24 category/preparation/source-filtering
+  checks, and 17 JavaScript UI checks. The new cases cover editable names, exact
+  training/validation selection, multiple versions, invalid names/paths,
+  overwrite protection, original datasets, and independent training caches.
+- Real preparation from normalized landmark fixtures succeeded through both the
+  category CLI and native desktop UI. Per-version validation succeeded through
+  the desktop UI. An original category-level dataset still validated after a
+  named child dataset was prepared; its original files and cache were unchanged.
+- A native WebView2 check exercised the editable name and output preview,
+  preparation, validation buttons, training selection, and selection persistence
+  after refresh. Dataset and training screens were captured and inspected.
+  Training used a lightweight worker after verifying its real command's dataset
+  and run paths; full TensorFlow training and physical camera capture were not
+  repeated for this path-layout change. No existing user datasets were moved.
+
 ## Desktop dashboard verification — 2026-10-14
 
 - All 28 dashboard Python tests passed on Windows with Python 3.13.13, including

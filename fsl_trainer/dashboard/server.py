@@ -19,6 +19,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 from ..paths import PROJECT_ROOT
 from ..data.augmentation_options import extra_samples, time_warp
 from ..data.source_selection import SUPPORTED, VIDEO_EXTENSIONS, source_files, folder_selection
+from ..data.dataset_paths import dataset_name, prepared_datasets, select_dataset
 from .live import LiveInference
 
 BASE = PROJECT_ROOT
@@ -117,11 +118,16 @@ def inventory(data="data", datasets="datasets_augmented"):
     for name in names:
         classes = source_classes(sources / name)
         target = prepared / name
+        versions = [{"name": p.name if p != target else "Original dataset",
+                     "path": p.relative_to(BASE).as_posix(), "legacy": p == target,
+                     "summary": read_json(p / "augmentation_summary.json", {})}
+                    for p in prepared_datasets(target)
+                    if p.resolve() == BASE or BASE in p.resolve().parents]
         rows.append({"name": name, "classes": classes,
                      "samples": sum(c["samples"] for c in classes),
                      "preparation_issue": preparation_issue(sources / name, classes),
-                     "prepared": (target / "manifest.json").is_file(),
-                     "summary": read_json(target / "augmentation_summary.json", {})})
+                     "prepared": bool(versions), "datasets": versions,
+                     "summary": versions[0]["summary"] if len(versions) == 1 else {}})
     return rows
 
 
@@ -148,8 +154,9 @@ def build_command(data):
     if action in {"prepare", "train", "inspect"}:
         category = folder_name(data.get("category"))
         datasets = local_path(data.get("datasets", "datasets_augmented"))
-        dataset = local_path(category, datasets)
+        category_root = local_path(category, datasets)
     if action == "prepare":
+        dataset = local_path(dataset_name(data.get("dataset_name")), category_root)
         selected = folder_selection(data.get("source_folders"))
         videos_only = data.get("videos_only", False)
         if not isinstance(videos_only, bool):
@@ -162,7 +169,7 @@ def build_command(data):
         if source == dataset or source in dataset.parents or dataset in source.parents:
             raise ValueError("Source and dataset folders must be separate and non-nested.")
         if dataset.exists() and (not dataset.is_dir() or any(dataset.iterdir())):
-            raise ValueError("Dataset output already exists. Choose a new dataset root.")
+            raise ValueError("Dataset output already exists. Choose a new dataset name.")
         validation = number(data, "validation", .15, .001, .99)
         test = number(data, "test", .15, .001, .99)
         if validation + test >= 1:
@@ -193,8 +200,14 @@ def build_command(data):
                 raise ValueError("Group CSV not found.")
             command += ["--groups", str(groups)]
     elif action in {"train", "inspect"}:
-        if not (dataset / "manifest.json").is_file():
-            raise ValueError("Prepare this category in the selected dataset root first.")
+        if "dataset" in data:
+            dataset = local_path(data["dataset"])
+            if dataset not in {p.resolve() for p in prepared_datasets(category_root)}:
+                raise ValueError("Choose a prepared dataset from the selected category and dataset root.")
+        else:
+            dataset = select_dataset(category_root, data.get("dataset_name"))
+        if dataset is None:
+            raise ValueError("Prepare a named dataset for this category first.")
         command += [action, "--dataset", str(dataset)]
         if action == "train":
             output = local_path(folder_name(data.get("run")), local_path(category, BASE / "runs"))
@@ -251,6 +264,7 @@ class Jobs:
                                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             job = {"id": secrets.token_hex(8), "action": data["action"],
                    "category": data.get("category", "prediction"), "status": "running",
+                   "dataset": data.get("dataset") or data.get("dataset_name"),
                    "started": datetime.now().isoformat(timespec="seconds"),
                    "command": subprocess.list2cmdline(command), "exit_code": None,
                    "logs": deque(maxlen=1800)}
