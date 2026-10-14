@@ -53,10 +53,22 @@ with Ctrl+C in its terminal.
 
 The default source root is `data`, dataset root is `datasets_augmented`, and model
 root is `runs`. Change the first two under **Datasets → Project folders → Scan
-folders**, for example to use the CLI's `datasets` default. Paths must stay inside
+folders** to use another source or dataset root. Paths must stay inside
 the project. Existing datasets and runs are protected from overwrite. Add source
-files through your file manager, then refresh the dashboard. A prepared manifest
-indicates an existing dataset; **Validate dataset** performs the full trainer check.
+files through your file manager, then refresh the dashboard. Enter an editable
+**Dataset name** when preparing: output is saved under
+`datasets_augmented/<category>/<dataset name>/`. The output preview updates while
+you type. Keep the existing split, augmentation, source filtering, and extraction
+controls to configure each version independently. Use a new name for each version;
+existing and partial outputs are protected from overwrite.
+
+Each category lists its saved datasets with a **Validate dataset** button for each
+one. Under **Training**, choose the category and **Prepared dataset**; the displayed
+path is passed to training and saved in that run's training configuration. Prediction
+continues using the run's checkpoint and copied preprocessing settings. Existing
+datasets directly under `<dataset root>/<category>/` remain selectable as
+**Original dataset**; no data is moved automatically. A manifest indicates a saved
+dataset; **Validate dataset** performs the full trainer check.
 The dashboard starts one job at a time and binds only to loopback. Activity history
 is held in memory until restart; generated artifacts remain in the usual folders.
 
@@ -127,12 +139,12 @@ recursively; files directly inside a gesture are included only in All source
 folders mode. Selection leaves original files untouched and is recorded in
 preprocessing settings, plus the extraction report for raw media. A Group CSV must cover exactly the
 selected supported sources; folder selection itself does not assign signer or
-session groups. Choose a fresh dataset root for this preparation.
+session groups. Choose a fresh dataset name for this preparation.
 
 The equivalent CLI options can be repeated for any folder names:
 
 ```powershell
-python categories.py prepare --category colors --datasets datasets_colors_selected --source-folder S1 --source-folder S2 --source-folder S3 --videos-only
+python categories.py prepare --category colors --dataset-name selected_sources --source-folder S1 --source-folder S2 --source-folder S3 --videos-only
 ```
 
 Dashboard checks (no ML dependencies needed):
@@ -170,16 +182,16 @@ Open a terminal in this folder. Verified with Python 3.12 on Windows CPU; requir
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe categories.py list
-.\.venv\Scripts\python.exe categories.py prepare --category alphabet
-.\.venv\Scripts\python.exe categories.py train --category alphabet --run first
+.\.venv\Scripts\python.exe categories.py prepare --category alphabet --dataset-name prepared_v1
+.\.venv\Scripts\python.exe categories.py train --category alphabet --dataset-name prepared_v1 --run first
 .\.venv\Scripts\python.exe trainer.py predict --run runs\alphabet\first --sample data\alphabet\A\image001.jpg
 ```
 
 To prepare and train every populated category:
 
 ```powershell
-.\.venv\Scripts\python.exe categories.py prepare --all
-.\.venv\Scripts\python.exe categories.py train --all --run first
+.\.venv\Scripts\python.exe categories.py prepare --all --dataset-name prepared_v1
+.\.venv\Scripts\python.exe categories.py train --all --dataset-name prepared_v1 --run first
 ```
 
 Repeat --category to select several, for example --category alphabet --category numbers. --all skips empty categories and reports them. Explicitly selecting an empty category returns an error. A failed category is reported while other selected jobs continue; retry failed categories explicitly after fixing their data.
@@ -189,8 +201,8 @@ Each category starts a fresh model in a separate process, using the same Conv1D�
 Outputs are separate:
 
 ```text
-datasets/alphabet/{train,validation,test}/<gesture>/*.npy
-datasets/numbers/{train,validation,test}/<gesture>/*.npy
+datasets_augmented/alphabet/prepared_v1/{train,validation,test}/<gesture>/*.npy
+datasets_augmented/numbers/prepared_v1/{train,validation,test}/<gesture>/*.npy
 runs/alphabet/first/best.keras
 runs/alphabet/first/classes.json
 runs/alphabet/first/test_metrics.json
@@ -201,7 +213,7 @@ runs/numbers/first/test_metrics.json
 
 Other training artifacts are stored alongside each model. Prediction uses the chosen category's run directory; there is no automatic category classifier. Category defaults resolve relative to the repository root, so commands work from another working directory when you pass the script's full path.
 
-Existing outputs are protected. Use a new --run name for retraining (omitting it generates a timestamp). To prepare another dataset version use --datasets datasets_v2 on both category prepare and train commands. --data and --runs override the source and model roots.
+Existing outputs are protected. Use a new --run name for retraining (omitting it generates a timestamp). To prepare another dataset version, use a new `--dataset-name` on category prepare and select that name on category train. Preparation defaults to `prepared_v1` beneath `datasets_augmented/<category>/`. Training can infer the dataset only when exactly one exists; otherwise specify `--dataset-name`. Use `--dataset-name .` to train an original category-level dataset. The `--datasets` option still changes the dataset root, while `--data` and `--runs` change source and model roots.
 
 Category preparation supports --static-variants 8, --jitter 0.0075, --validation 0.15, --test 0.15 and --seed 42. For signer/session groups, pass --groups-dir groups with groups/alphabet.csv, groups/numbers.csv, etc. CSV paths are relative to each category, for example A/image001.npy. Each model's split is independent; cross-category signer separation is not imposed.
 
@@ -432,9 +444,9 @@ Preparation can create extra timing variations from videos and pre-extracted
 multi-frame `.npy` landmarks. It is disabled by default. Enable it with:
 
 ```powershell
-python categories.py prepare --category alphabet --datasets datasets_video_v1 --video-extra-samples 3 --video-time-warp 0.05
-python trainer.py inspect --dataset datasets_video_v1/alphabet
-python categories.py train --category alphabet --datasets datasets_video_v1 --run video_augmented_v1
+python categories.py prepare --category alphabet --dataset-name video_v1 --video-extra-samples 3 --video-time-warp 0.05
+python trainer.py inspect --dataset datasets_augmented/alphabet/video_v1
+python categories.py train --category alphabet --dataset-name video_v1 --run video_augmented_v1
 ```
 
 `--video-extra-samples` accepts integers 0–1000; zero disables the feature.

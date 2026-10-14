@@ -58,11 +58,14 @@ class DashboardTests(unittest.TestCase):
         command = dashboard.build_command({"action": "train", "category": "alphabet", "run": "fresh"})
         self.assertEqual(command[:3], [sys.executable, "-u", "-B"])
         self.assertIn(str(self.dataset), command)
-        for action, extra in [("train", {"run": "first"}), ("prepare", {})]:
+        existing = self.dataset / "existing"
+        existing.mkdir()
+        (existing / "manifest.json").write_text("[]")
+        for action, extra in [("train", {"run": "first"}), ("prepare", {"dataset_name": "existing"})]:
             with self.subTest(action=action), self.assertRaisesRegex(ValueError, "already exists"):
-                dashboard.build_command({"action": action, "category": "alphabet", **extra})
+                dashboard.build_command({"action": action, "category": "alphabet", "dataset": "datasets_augmented/alphabet", **extra})
         with self.assertRaisesRegex(ValueError, "sum"):
-            dashboard.build_command({"action": "prepare", "category": "alphabet",
+            dashboard.build_command({"action": "prepare", "dataset_name": "fresh", "category": "alphabet",
                                      "datasets": "fresh_datasets", "validation": .7, "test": .4})
         command = dashboard.build_command({"action": "predict", "run": "runs/alphabet/first",
                                            "sample": "data/alphabet/A/sample.jpg"})
@@ -75,7 +78,7 @@ class DashboardTests(unittest.TestCase):
         for folder in (self.source, second):
             for index in range(3):
                 (folder / f"source-{index}.mp4").write_bytes(b"fixture")
-        request = {"action": "prepare", "category": "alphabet", "datasets": "fresh_datasets"}
+        request = {"action": "prepare", "dataset_name": "fresh", "category": "alphabet", "datasets": "fresh_datasets"}
         baseline = dashboard.build_command(request)
         self.assertNotIn("--video-extra-samples", baseline)
         command = dashboard.build_command({**request, "video_extra_samples": 3, "video_time_warp": .05})
@@ -111,7 +114,7 @@ class DashboardTests(unittest.TestCase):
         blue = next(c for c in row["classes"] if c["name"] == "blue")
         self.assertEqual(blue["folders"]["S4"], {"samples": 1, "videos": 1})
         self.assertEqual(blue["folders"]["PUB"], {"samples": 2, "videos": 1})
-        request = {"action": "prepare", "category": "colors", "datasets": "fresh",
+        request = {"action": "prepare", "dataset_name": "fresh", "category": "colors", "datasets": "fresh",
                    "source_folders": ["S1", "S2", "S4"], "videos_only": True}
         command = dashboard.build_command(request)
         self.assertEqual([command[i + 1] for i, value in enumerate(command) if value == "--source-folder"],
@@ -133,12 +136,12 @@ class DashboardTests(unittest.TestCase):
         jobs = dashboard.Jobs()
         with patch.object(dashboard.subprocess, "Popen") as worker:
             with self.assertRaisesRegex(ValueError, "data/empty/A/"):
-                jobs.start({"action": "prepare", "category": "empty", "datasets": "fresh_datasets"})
+                jobs.start({"action": "prepare", "dataset_name": "fresh", "category": "empty", "datasets": "fresh_datasets"})
             worker.assert_not_called()
         self.assertFalse((self.root / "fresh_datasets").exists())
 
     def test_preparation_requires_two_classes_and_enough_sources(self):
-        request = {"action": "prepare", "category": "alphabet", "datasets": "fresh_datasets"}
+        request = {"action": "prepare", "dataset_name": "fresh", "category": "alphabet", "datasets": "fresh_datasets"}
         with self.assertRaisesRegex(ValueError, "second class"):
             dashboard.build_command(request)
         second = self.source.parent / "B"

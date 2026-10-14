@@ -33,7 +33,7 @@ class CategoryTests(unittest.TestCase):
             self.assertEqual(skipped, ["empty"])
             self.assertEqual([j[0] for j in jobs], ["alphabet", "custom_category", "numbers"])
             for name, target, command in jobs:
-                self.assertEqual(target, (root/"datasets"/name).resolve())
+                self.assertEqual(target, (root/"datasets"/name/"prepared_v1").resolve())
                 self.assertIn(str((root/"data"/name).resolve()), command)
             selected, _ = c.build_jobs(self.options(root, category=["numbers"]))
             self.assertEqual([j[0] for j in selected], ["numbers"])
@@ -58,7 +58,7 @@ class CategoryTests(unittest.TestCase):
             for name in ("missing", "empty"):
                 with self.assertRaises(ValueError):
                     c.build_jobs(self.options(root, category=[name]))
-            target = root/"datasets"/"alphabet"
+            target = root/"datasets"/"alphabet"/"prepared_v1"
             target.mkdir(parents=True)
             (target/"keep.txt").write_text("keep")
             with self.assertRaises(ValueError):
@@ -81,6 +81,48 @@ class CategoryTests(unittest.TestCase):
         for value in ("..", "../escape", "a/b", "a\\b"):
             with self.assertRaises(argparse.ArgumentTypeError):
                 c.category_name(value)
+
+    def test_named_preparation_and_training_share_the_selected_directory(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self.source(root, 'alphabet')
+            args = self.options(root, category=['alphabet'], dataset_name='selected v2')
+            jobs, _ = c.build_jobs(args)
+            target = (root / 'datasets' / 'alphabet' / 'selected v2').resolve()
+            self.assertEqual(jobs[0][1], target)
+            target.mkdir(parents=True)
+            (target / 'manifest.json').write_text('[]')
+            jobs, _ = c.build_jobs(self.options(root, command='train', category=['alphabet'], dataset_name='selected v2'))
+            command = jobs[0][2]
+            self.assertEqual(command[command.index('--dataset') + 1], str(target))
+            self.assertEqual(jobs[0][1], (root / 'runs' / 'alphabet' / 'first').resolve())
+            with self.assertRaisesRegex(ValueError, 'already contains data'):
+                c.build_jobs(args)
+            with self.assertRaises(ValueError):
+                c.build_jobs(self.options(root, dataset_name='../escape'))
+
+    def test_multiple_datasets_require_an_explicit_training_selection(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for name in ('v1', 'v2'):
+                folder = root / 'datasets' / 'alphabet' / name
+                folder.mkdir(parents=True)
+                (folder / 'manifest.json').write_text('[]')
+            with self.assertRaisesRegex(ValueError, '--dataset-name'):
+                c.build_jobs(self.options(root, command='train'))
+            original = root / 'datasets' / 'alphabet'
+            (original / 'manifest.json').write_text('[]')
+            jobs, _ = c.build_jobs(self.options(root, command='train', dataset_name='.'))
+            self.assertIn(str(original.resolve()), jobs[0][2])
+
+    def test_cli_defaults_and_custom_name(self):
+        for command in ('prepare', 'train'):
+            with self.subTest(command=command), patch.object(c, 'execute') as execute, \
+                    patch('sys.argv', ['categories.py', command, '--category', 'alphabet', '--dataset-name', 'custom']):
+                c.main()
+                args = execute.call_args.args[0]
+                self.assertEqual(args.dataset_name, 'custom')
+                self.assertEqual(Path(args.datasets), c.BASE / 'datasets_augmented')
 
     def test_selected_folders_are_forwarded_after_the_prepare_subcommand(self):
         with tempfile.TemporaryDirectory() as temp:

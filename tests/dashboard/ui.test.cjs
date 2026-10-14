@@ -7,20 +7,22 @@ const vm = require('node:vm');
 
 function dashboard() {
   const nodes = new Map();
+  const documentHandlers = {};
   function node(id) {
     if (!nodes.has(id)) nodes.set(id, {
       value: '', textContent: '', hidden: false, disabled: false,
       addEventListener(name, handler) { (this.handlers ??= {})[name] = handler; }, classList: {toggle() {}},
       querySelector: () => node(`${id}-submit`),
       replaceChildren() { this.innerHTML = ''; },
-      querySelectorAll: () => [], elements: {category: {value: 'alphabet', addEventListener() {}}, hand_model: {value: ''}}
+      querySelectorAll: () => [], elements: {category: {value: 'alphabet',
+        addEventListener(name, handler) { (this.handlers ??= {})[name] = handler; }}, hand_model: {value: ''}}
     });
     return nodes.get(id);
   }
   const submits = ['prepare-form', 'train-form', 'predict-form'].map(id => node(`${id}-submit`));
   const context = vm.createContext({
     document: {getElementById: node, querySelectorAll: selector => selector === '.submit-job' ? submits : [],
-      addEventListener() {}},
+      addEventListener(name, handler) { documentHandlers[name] = handler; }},
     window: {addEventListener() {}}, location: {hash: '#datasets'},
     // Leave the initial network scan pending; tests supply state explicitly.
     fetch: () => new Promise(() => {}), setInterval() {}, setTimeout() {}, clearTimeout() {},
@@ -28,7 +30,7 @@ function dashboard() {
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../../fsl_trainer/dashboard/ui/app.js'), 'utf8'), context);
   vm.runInContext("loading = false; token = 'test-token';", context);
-  return {node, run: code => vm.runInContext(code, context), context};
+  return {node, run: code => vm.runInContext(code, context), context, documentHandlers};
 }
 
 test('a stale missing-data scan allows a fresh preparation check', () => {
@@ -75,6 +77,7 @@ test('preparation submits video controls with the existing form fields', async (
   app.context.FormData = class {
     *[Symbol.iterator]() {
       yield ['category', 'alphabet'];
+      yield ['dataset_name', 'custom preparation'];
       yield ['video_extra_samples', '3'];
       yield ['video_time_warp', '0.05'];
       yield ['seed', '42'];
@@ -89,9 +92,88 @@ test('preparation submits video controls with the existing form fields', async (
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(requests.length, 1);
   assert.equal(requests[0].action, 'prepare');
+  assert.equal(requests[0].dataset_name, 'custom preparation');
   assert.equal(requests[0].video_extra_samples, '3');
   assert.equal(requests[0].video_time_warp, '0.05');
   assert.equal(requests[0].seed, '42');
+});
+
+test('editing the dataset name updates the preparation output preview', () => {
+  const app = dashboard();
+  app.node('dataset-root').value = 'datasets_augmented';
+  app.node('dataset-name').value = 'filtered_v2';
+  app.node('dataset-name').handlers.input();
+  assert.equal(app.node('prepare-output').textContent, 'Output: datasets_augmented/alphabet/filtered_v2');
+  assert.equal(app.node('prepare-error').hidden, true);
+});
+
+test('dataset name input uses a valid browser pattern that accepts names and rejects paths', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../../fsl_trainer/dashboard/ui/index.html'), 'utf8');
+  const pattern = html.match(/id="dataset-name"[^>]*pattern="([^"]*)"/)[1]
+    .replace(/&(?:quot|lt|gt);/g, entity => ({'&quot;': '"', '&lt;': '<', '&gt;': '>'})[entity]);
+  const expression = new RegExp(`^(?:${pattern})$`, 'v');
+  assert.equal(expression.test('custom dataset v2'), true);
+  for (const value of ['', '../outside', 'a/b', 'a\\b', 'a|b', 'a:b']) {
+    assert.equal(expression.test(value), false, value);
+  }
+});
+
+test('training selection tracks its category and survives refreshes', () => {
+  const app = dashboard();
+  app.run(`state.categories = [
+    {name: 'alphabet', datasets: [{name: 'v1', path: 'datasets_augmented/alphabet/v1'},
+                                {name: 'v2', path: 'datasets_augmented/alphabet/v2'}]},
+    {name: 'colors', datasets: [{name: 'Original dataset', path: 'datasets_augmented/colors'}]}
+  ]; renderTrainingDatasets();`);
+  assert.equal(app.node('train-dataset').value, 'datasets_augmented/alphabet/v1');
+  app.node('train-dataset').value = 'datasets_augmented/alphabet/v2';
+  app.run('renderTrainingDatasets()');
+  assert.equal(app.node('train-dataset').value, 'datasets_augmented/alphabet/v2');
+  assert.match(app.node('training-source').textContent, /datasets_augmented\/alphabet\/v2/);
+  assert.equal(app.node('train-form-submit').disabled, false);
+  const category = app.node('train-form').elements.category;
+  category.value = 'colors';
+  category.handlers.change();
+  assert.equal(app.node('train-dataset').value, 'datasets_augmented/colors');
+  assert.doesNotMatch(app.node('train-dataset').innerHTML, /alphabet/);
+  category.value = 'missing';
+  category.handlers.change();
+  assert.equal(app.node('train-dataset').value, '');
+  assert.equal(app.node('train-form-submit').disabled, true);
+});
+
+test('training submits the selected prepared dataset', async () => {
+  const app = dashboard(), requests = [];
+  app.context.FormData = class {
+    *[Symbol.iterator]() {
+      yield ['category', 'alphabet'];
+      yield ['dataset', 'datasets_augmented/alphabet/filtered_v2'];
+      yield ['run', 'model_v2'];
+    }
+  };
+  app.context.fetch = async (url, options) => {
+    if (options?.method === 'POST') requests.push(JSON.parse(options.body));
+    return {ok: false, json: async () => ({error: 'Fixture rejection'})};
+  };
+  const form = app.node('train-form');
+  form.handlers.submit({preventDefault() {}, currentTarget: form});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(requests[0].action, 'train');
+  assert.equal(requests[0].dataset, 'datasets_augmented/alphabet/filtered_v2');
+});
+
+test('validation buttons submit their own dataset path', async () => {
+  const app = dashboard(), requests = [];
+  app.context.fetch = async (url, options) => {
+    if (options?.method === 'POST') requests.push(JSON.parse(options.body));
+    return {ok: false, json: async () => ({error: 'Fixture rejection'})};
+  };
+  app.documentHandlers.click({target: {closest: selector => selector === '[data-inspect]'
+    ? {dataset: {inspect: 'alphabet', dataset: 'datasets_augmented/alphabet/v2'}} : null}});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(requests[0].action, 'inspect');
+  assert.equal(requests[0].category, 'alphabet');
+  assert.equal(requests[0].dataset, 'datasets_augmented/alphabet/v2');
 });
 
 test('folder choices update preview and are submitted without PUB', async () => {

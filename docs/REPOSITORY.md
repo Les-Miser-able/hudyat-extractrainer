@@ -20,13 +20,14 @@ py -3.12 -m venv .venv
 Add your own media to `data/<category>/<gesture>/`, then prepare and train:
 
 ```powershell
-.\.venv\Scripts\python.exe categories.py prepare --category family --datasets datasets_augmented
-.\.venv\Scripts\python.exe categories.py train --category family --datasets datasets_augmented --run first
+.\.venv\Scripts\python.exe categories.py prepare --category family --dataset-name prepared_v1
+.\.venv\Scripts\python.exe categories.py train --category family --dataset-name prepared_v1 --run first
 ```
 
 The MediaPipe hand model and existing trained checkpoints are included. Source
 data must be supplied separately to prepare datasets or retrain on another machine.
-Use a fresh output root/run name when existing outputs are present.
+Prepared datasets live under `datasets_augmented/<category>/<dataset name>/`.
+Use a fresh dataset name/run name when existing outputs are present.
 
 Included runs: `alphabet/{first,optimized,webcam_v2,augmented_v1}`,
 `colors/{first,augmented_v1}`, and `family/augmented_v1`. Each checkpoint ships
