@@ -20,3 +20,15 @@
   in this teaching turn. No evidence of lesson completion or mastery yet.
 - Teaching artifacts remain under learning/ following the requested project
   reorganization; use this existing course state for future teaching sessions.
+- The learner requested the entire dataset preparation pipeline and flow.
+  Lesson 0003 and reference/dataset-pipeline.html trace the current named-dataset
+  layout, detection, groups, resampling, static jitter, optional timing variations,
+  evidence files, validation, and training/prediction handoff. The source-count
+  widget is illustrative; it does not run inference. No mastery is inferred.
+- Revisit the difference between one original source and multiple generated
+  samples, and the current static-jitter behavior in validation/test. Ask the
+  learner to explain one manifest row before recording new learning evidence.
+- The learner asked what checkboxes, sliders, and dropdowns do. Explain the
+  teaching simulator separately from actual FSL Studio controls. Preparation
+  currently uses numeric fields rather than range sliders; distinguish
+  multi-option checkboxes from single-answer quiz radio buttons.

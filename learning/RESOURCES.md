@@ -26,6 +26,23 @@
   Official constant-frame-rate conversion behavior. Use when source videos
   have variable timing or need a consistent frame rate before extraction.
 
+- [Current preparation pipeline reference](reference/dataset-pipeline.html)
+  Code-grounded map of named dataset routing, extraction, grouping, sampling,
+  metadata, validation, and the handoff to training. Use with Lesson 0003.
+- [Shared sequence sampler](../fsl_trainer/data/sequences.py)
+  Exact full-timeline linear interpolation, nearest-frame presence selection,
+  and absent-slot zeroing used for fixed 32-by-128 model inputs.
+- [Video timing augmentation](../fsl_trainer/data/augmentation.py)
+  Exact training-only timing variations, deterministic candidate generation,
+  duplicate rejection, and shortfall reporting. Use to distinguish requested
+  extras from generated samples.
+- [Named dataset paths](../fsl_trainer/data/dataset_paths.py)
+  The current version discovery and legacy-dataset selection rules. Use when
+  connecting preparation outputs to the selected training input.
+- [scikit-learn: Cross-validation iterators for grouped data](https://scikit-learn.org/stable/modules/cross_validation.html#cross-validation-iterators-for-grouped-data)
+  Primary explanation of why related observations must remain in the same split.
+  Use for the rationale; this project's splitter is its own implementation.
+
 ## Wisdom (Communities)
 
 No community has been selected. The current goal is a small local learning
