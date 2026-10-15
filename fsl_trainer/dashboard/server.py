@@ -25,6 +25,8 @@ from ..data.source_selection import IMAGE_EXTENSIONS
 from .live import LiveInference
 from .timing import capture_timing
 from .model_records import run_metadata, read_records, save_record
+from .prediction_tests import read_tests, save_test, export_model
+from .model_exports import native_archive, saved_run, export_options, matching_hand_model, download_name
 
 BASE = PROJECT_ROOT
 UI = Path(__file__).resolve().parent / "ui"
@@ -146,6 +148,7 @@ def runs():
             rows.append({"id": run.relative_to(BASE).as_posix(), "name": run.name,
                          "category": category.name, "classes": len(classes), "class_labels": classes,
                          "metadata": run_metadata(run),
+                         "exports": export_options(run),
                          "accuracy": metrics.get("accuracy"), "f1": metrics.get("macro_f1"),
                          "complete": (run / "test_metrics.json").is_file(),
                          "checkpoint": (run / "best.keras").is_file(),
@@ -232,6 +235,18 @@ def build_command(data):
                         "--patience", str(number(data, "patience", 12, 1, 10000, True))]
             if data.get("class_weights") is True:
                 command += ["--class-weights"]
+    elif action == "export":
+        run, row = saved_run(BASE, data.get("run"), runs())
+        options = export_options(run)
+        if not options['hudyat']:
+            raise ValueError(options['reason'])
+        detector = matching_hand_model(BASE, run, data.get('hand_model'))
+        export_id = data.get('_job_id') or secrets.token_hex(8)
+        if not isinstance(export_id, str) or len(export_id) != 16 or any(c not in '0123456789abcdef' for c in export_id):
+            raise ValueError('Invalid export job identifier.')
+        output = local_path('exports/hudyat/' + export_id + '.zip')
+        return [sys.executable, '-u', '-B', str(BASE / 'tools/export_hudyat_model.py'),
+                '--run', row['id'], '--output', str(output), '--hand-model', str(detector)]
     elif action == "predict":
         run = local_path(data.get("run"), BASE)
         if BASE / "runs" not in run.parents or not (run / "best.keras").is_file():
@@ -269,14 +284,18 @@ class Jobs:
                 raise ValueError("Stop live camera prediction before starting a job.")
             if self.process and self.process.poll() is None:
                 raise ValueError("A job is already running. Wait or stop it first.")
-            command = build_command(data)
+            job_id = secrets.token_hex(8)
+            command = build_command({**data, '_job_id': job_id} if data.get('action') == 'export' else data)
             process = subprocess.Popen(command, cwd=BASE, stdout=subprocess.PIPE,
                                        stderr=subprocess.STDOUT, text=True, encoding="utf-8",
                                        errors="replace", bufsize=1,
                                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-            job = {"id": secrets.token_hex(8), "action": data["action"],
-                   "category": data.get("category", "prediction"), "status": "running",
+            job = {"id": job_id, "action": data["action"],
+                   "category": Path(data['run']).parent.name if data['action'] == 'export' else data.get("category", "prediction"),
+                   "status": "running",
                    "dataset": data.get("dataset") or data.get("dataset_name"),
+                   "run": data.get("run") if data["action"] in {"predict", "export"} else None,
+                   "sample": data.get("sample") if data["action"] == "predict" else None,
                    "started": datetime.now().isoformat(timespec="seconds"),
                    "command": subprocess.list2cmdline(command), "exit_code": None,
                    "logs": deque(maxlen=1800)}
@@ -338,10 +357,26 @@ class Jobs:
 
 
 class Handler(BaseHTTPRequestHandler):
-    def reply(self, value, status=200):
-        payload = json.dumps(value, ensure_ascii=False, allow_nan=False).encode("utf-8")
+    def download(self, handle, filename):
+        size = handle.seek(0, 2)
+        handle.seek(0)
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/zip')
+        self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
+        self.send_header('Content-Length', str(size))
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('X-Content-Type-Options', 'nosniff')
+        self.end_headers()
+        while chunk := handle.read(1024 * 1024):
+            self.wfile.write(chunk)
+
+    def reply(self, value, status=200, filename=None):
+        payload = json.dumps(value, ensure_ascii=False, allow_nan=False,
+                             indent=2 if filename else None).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        if filename:
+            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
         self.send_header("Content-Length", str(len(payload)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -361,8 +396,32 @@ class Handler(BaseHTTPRequestHandler):
             if url.path == "/api/state":
                 return self.reply({"categories": inventory(query.get("data", ["data"])[0],
                                                           query.get("datasets", ["datasets_augmented"])[0]),
-                                   "runs": runs(), "model_records": read_records(BASE), "token": self.server.token,
+                                   "runs": runs(), "model_records": read_records(BASE),
+                                   "prediction_tests": read_tests(BASE), "token": self.server.token,
                                    "python": sys.version.split()[0]})
+            if url.path == '/api/model/download':
+                with native_archive(BASE, query.get('run', [''])[0], runs()) as (handle, filename):
+                    return self.download(handle, filename)
+            if url.path == '/api/model/export/download':
+                job_id = query.get('id', [''])[0]
+                job = next((j for j in self.server.jobs.snapshot()
+                            if j['id'] == job_id and j['action'] == 'export' and j['status'] == 'completed'), None)
+                if job is None:
+                    raise ValueError('Complete a HUDYAT export before downloading its bundle.')
+                path = local_path('exports/hudyat/' + job_id + '.zip')
+                name = download_name(job['run'].replace('/', '-')) + '-hudyat.zip'
+                with path.open('rb') as handle:
+                    return self.download(handle, name)
+            if url.path == "/api/model-record/export":
+                exported = export_model(BASE, query.get("run", [""])[0], runs())
+                name = exported["model"]["category"] + "-" + exported["model"]["name"]
+                safe = "".join(c if c.isascii() and (c.isalnum() or c in "-_") else "-" for c in name)[:100]
+                return self.reply(exported, filename=f"{safe}-record.json")
+            if url.path == "/api/prediction-test/export":
+                test = read_tests(BASE).get(query.get("id", [""])[0])
+                if test is None:
+                    raise ValueError("Prediction test not found.")
+                return self.reply({"version": 1, "test": test}, filename=f"prediction-test-{test['number']}.json")
             if url.path == "/api/jobs":
                 return self.reply(self.server.jobs.snapshot())
             if url.path == "/api/run":
@@ -404,6 +463,8 @@ class Handler(BaseHTTPRequestHandler):
             data = json.loads(self.rfile.read(size))
             if not isinstance(data, dict):
                 raise ValueError("Expected a JSON object.")
+            if self.path == "/api/prediction-test":
+                return self.reply(save_test(BASE, data, runs()))
             if self.path == "/api/model-record":
                 return self.reply({"model_records": save_record(BASE, data, runs())})
             if self.path == "/api/live/start":

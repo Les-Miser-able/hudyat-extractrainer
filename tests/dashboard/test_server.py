@@ -1,5 +1,7 @@
 """Dashboard contracts; no ML dependencies or training required."""
 import json
+import hashlib
+import io
 from pathlib import Path
 import shutil
 import sys
@@ -10,6 +12,7 @@ import unittest
 from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+from zipfile import ZipFile
 
 import dashboard
 
@@ -93,6 +96,27 @@ class DashboardTests(unittest.TestCase):
                                            "sample": "data/alphabet/A/sample.jpg"})
         self.assertIn(str(self.source / "sample.jpg"), command)
         self.assertFalse((self.root / "runs" / "alphabet" / "fresh").exists())
+
+    def test_hudyat_export_command_uses_selected_model_and_verified_detector(self):
+        detector = self.root / 'assets/hand_landmarker.task'
+        detector.parent.mkdir()
+        detector.write_bytes(b'detector')
+        (self.run / 'preprocessing.json').write_text(json.dumps({'extraction': {
+            'model_sha256': hashlib.sha256(b'detector').hexdigest()}}))
+        request = {'action': 'export', 'run': 'runs/alphabet/first', '_job_id': '0011223344556677'}
+        command = dashboard.build_command(request)
+        self.assertEqual(command[:3], [sys.executable, '-u', '-B'])
+        self.assertEqual(command[3], str(self.root / 'tools/export_hudyat_model.py'))
+        self.assertEqual(command[command.index('--run') + 1], request['run'])
+        self.assertEqual(command[command.index('--output') + 1], str(self.root / 'exports/hudyat/0011223344556677.zip'))
+        self.assertEqual(command[command.index('--hand-model') + 1], str(detector))
+        for changes in ({'run': '../outside'}, {'_job_id': '../outside'}, {'hand_model': '../outside.task'},
+                        {'hand_model': True}, {'hand_model': ['assets/hand_landmarker.task']}):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                dashboard.build_command({**request, **changes})
+        detector.write_bytes(b'wrong')
+        with self.assertRaisesRegex(ValueError, 'hand detector'):
+            dashboard.build_command(request)
 
     def test_video_controls_forward_and_reject_invalid_values(self):
         second = self.source.parent / "B"
@@ -294,6 +318,64 @@ class DashboardHTTPTests(unittest.TestCase):
         self.assertEqual(self.request('/api/model-record', payload)[0], 403)
         self.assertEqual(self.request('/api/model-record', {**payload, 'run': '../outside'}, headers)[0], 400)
         self.assertEqual(self.request('/api/model-record', {**payload, 'missing_ms': False}, headers)[0], 400)
+
+    def test_prediction_tests_and_downloads_persist_model_details_with_authorization(self):
+        run_id = 'runs/greetings/test_history_fixture'
+        run = Path(self.temp.name) / run_id
+        run.mkdir(parents=True, exist_ok=True)
+        (run / 'classes.json').write_text('["afternoon", "evening"]')
+        (run / 'training_config.json').write_text('{"epochs":50,"seed":42}')
+        headers = {'X-Dashboard-Token': 'test-token'}
+        payload = {'run': run_id, 'notes': 'Camera test', 'live_trials': 10, 'live_correct': 8}
+        self.assertEqual(self.request('/api/prediction-test', payload)[0], 403)
+        self.assertEqual(self.request('/api/prediction-test', {**payload, 'run': '../outside'}, headers)[0], 400)
+        status, body = self.request('/api/prediction-test', payload, headers)
+        self.assertEqual(status, 200)
+        test = json.loads(body)['test']
+        self.assertEqual(test['name'], 'Test 1')
+        self.assertEqual(test['model']['training_config']['seed'], 42)
+        state = json.loads(self.request('/api/state')[1])
+        self.assertEqual(state['prediction_tests'][test['id']]['record']['live_correct'], 8)
+        with urlopen(self.origin + '/api/model-record/export?run=' + run_id, timeout=5) as response:
+            self.assertIn('attachment;', response.headers['Content-Disposition'])
+            exported = json.loads(response.read())
+            self.assertEqual(exported['model']['id'], run_id)
+            self.assertEqual(exported['prediction_tests'], [test])
+        with urlopen(self.origin + '/api/prediction-test/export?id=' + test['id'], timeout=5) as response:
+            self.assertEqual(response.headers['Content-Disposition'], 'attachment; filename="prediction-test-1.json"')
+            self.assertEqual(json.loads(response.read())['test'], test)
+        self.assertEqual(self.request('/api/model-record/export?run=../outside')[0], 400)
+        self.assertEqual(self.request('/api/prediction-test/export?id=missing')[0], 400)
+
+    def test_native_model_zip_and_completed_hudyat_bundle_are_downloadable(self):
+        run_id = 'runs/greetings/download_fixture'
+        run = Path(self.temp.name) / run_id
+        run.mkdir(parents=True, exist_ok=True)
+        (run / 'best.keras').write_bytes(b'actual model')
+        (run / 'classes.json').write_text('["afternoon", "evening"]')
+        (run / 'preprocessing.json').write_text('{}')
+        with urlopen(self.origin + '/api/model/download?run=' + run_id, timeout=5) as response:
+            self.assertEqual(response.headers['Content-Type'], 'application/zip')
+            self.assertIn('model.zip', response.headers['Content-Disposition'])
+            with ZipFile(io.BytesIO(response.read())) as archive:
+                self.assertEqual(archive.read('best.keras'), b'actual model')
+                self.assertIn('model-record.json', archive.namelist())
+        self.assertEqual(self.request('/api/model/download?run=../outside')[0], 400)
+        job_id = '1122334455667788'
+        bundle = Path(self.temp.name) / 'exports/hudyat' / (job_id + '.zip')
+        bundle.parent.mkdir(parents=True, exist_ok=True)
+        with ZipFile(bundle, 'w') as archive:
+            archive.writestr('model-assets/catalog.json', '{}')
+        job = {'id': job_id, 'action': 'export', 'status': 'completed', 'run': run_id}
+        with patch.object(self.server.jobs, 'snapshot', return_value=[job]):
+            status, payload = self.request('/api/model/export/download?id=' + job_id)
+            self.assertEqual(status, 200)
+            with ZipFile(io.BytesIO(payload)) as archive:
+                self.assertIn('model-assets/catalog.json', archive.namelist())
+            for status in ('running', 'failed', 'cancelled'):
+                job['status'] = status
+                self.assertEqual(self.request('/api/model/export/download?id=' + job_id)[0], 400)
+        self.assertEqual(self.request('/api/model/export/download?id=../outside')[0], 400)
 
     def test_live_endpoints_validate_paths_and_forward_frames(self):
         root = Path(self.temp.name)

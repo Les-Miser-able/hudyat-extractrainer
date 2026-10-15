@@ -22,13 +22,13 @@ def normalized(config):
     return config
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--category", required=True)
     parser.add_argument("--run", required=True, type=Path)
     parser.add_argument("--hand-model", type=Path, default=ROOT/"models"/"hand_landmarker.task")
     parser.add_argument("--site", type=Path, default=ROOT/"pwa-sample"/"dist")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if not args.category or any(c not in "abcdefghijklmnopqrstuvwxyz0123456789_-" for c in args.category):
         parser.error("Use a lowercase category ID containing letters, digits, hyphens or underscores.")
     classes = json.loads((args.run/"classes.json").read_text(encoding="utf-8"))

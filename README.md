@@ -137,6 +137,33 @@ model's mode and current sliders without interrupting an active capture.
 These manual records persist in `runs/model_records.json` across dashboard
 restarts. They do not change checkpoints, training data, or saved test metrics.
 
+**Download record** exports a model's current record, full saved training and
+preprocessing configuration, dataset metadata, offline scores, class labels,
+and prediction test history as a JSON file.
+
+**Download model ZIP** saves the actual trained Keras model with its labels,
+preprocessing, record, and available reports. **Export for HUDYAT** creates a
+browser model bundle in a background job; download it from Activity when ready.
+The ZIP includes an importer that preserves HUDYAT's other category releases
+and supports the selected model's camera preprocessing. Importing prepares its
+files; HUDYAT's `npm run models:register` activates the release separately.
+See [HUDYAT model export](integrations/hudyat/README.md) for the full workflow.
+
+After trying a sample or live camera prediction, choose **Save as test run**.
+Each model gets independent names such as **Test 1**, **Test 2**, and so on;
+you can also enter a custom name. The test keeps a snapshot of the model's
+description and original record, its tested camera settings, your notes and
+device/session, and the latest prediction from that model. Live trial counts,
+correct counts, and median recognition time are manual observations; new tests
+leave these blank until measured. Saving the same test again edits that test.
+Choose **Save as test run** again to create the next test.
+
+Under **Model runs → Prediction test runs**, filter by model, review each test's
+model details, edit observations, **Download test** as JSON, or **Try these
+settings** to repeat a test with its recorded camera settings. Tests persist in
+`runs/prediction_tests.json` after restarting. Each test references the trained
+model rather than copying its checkpoint or starting another training job.
+
 The existing [FSL Pocket webcam app](pwa-sample/README.md) remains available
 separately. Its setup/export workflow is unchanged.
 

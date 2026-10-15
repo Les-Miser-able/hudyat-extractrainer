@@ -20,6 +20,7 @@ class DesktopWindow:
     def run(self, url, jobs):
         initialization_errors = []
         try:
+            self.webview.settings['ALLOW_DOWNLOADS'] = True
             window = self.webview.create_window(
                 "FSL Studio", url, width=1280, height=850, min_size=(800, 600),
                 resizable=True, background_color="#f6f7f9", text_select=True,
