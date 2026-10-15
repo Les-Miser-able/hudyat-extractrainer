@@ -10,7 +10,7 @@ function dashboard() {
   const documentHandlers = {};
   function node(id) {
     if (!nodes.has(id)) nodes.set(id, {
-      value: '', textContent: '', hidden: false, disabled: false,
+      value: '', textContent: '', hidden: false, disabled: false, dataset: {},
       addEventListener(name, handler) { (this.handlers ??= {})[name] = handler; }, classList: {toggle() {}},
       querySelector: () => node(`${id}-submit`),
       replaceChildren() { this.innerHTML = ''; }, scrollIntoView() {},
@@ -19,7 +19,7 @@ function dashboard() {
     });
     return nodes.get(id);
   }
-  const submits = ['prepare-form', 'train-form', 'predict-form'].map(id => node(`${id}-submit`));
+  const submits = [...['prepare-form', 'train-form', 'predict-form'].map(id => node(`${id}-submit`)), node('model-export-start')];
   const context = vm.createContext({
     document: {getElementById: node, querySelectorAll: selector => selector === '.submit-job' ? submits : [],
       addEventListener(name, handler) { documentHandlers[name] = handler; }},
@@ -81,6 +81,7 @@ test('preparation submits video controls with the existing form fields', async (
       yield ['video_extra_samples', '3'];
       yield ['video_time_warp', '0.05'];
       yield ['seed', '42'];
+      yield ['normalization', 'hand-relative-sequence-v1'];
     }
   };
   app.context.fetch = async (url, options) => {
@@ -96,6 +97,7 @@ test('preparation submits video controls with the existing form fields', async (
   assert.equal(requests[0].video_extra_samples, '3');
   assert.equal(requests[0].video_time_warp, '0.05');
   assert.equal(requests[0].seed, '42');
+  assert.equal(requests[0].normalization, 'hand-relative-sequence-v1');
 });
 
 test('editing the dataset name updates the preparation output preview', () => {
@@ -485,4 +487,212 @@ test('a stale project refresh cannot replace a model record saved while it was p
   await pending;
   assert.equal(app.run("modelRecord('runs/greetings/a').decision"),'Preferred');
   assert.match(app.node('all-runs').innerHTML,/Preferred/);
+});
+
+test('saving a live prediction creates a separate numbered test and preserves the model record', async () => {
+  const app = dashboard(), requests = [];
+  app.run("state.runs=[{id:'runs/greetings/a',name:'a',category:'greetings',checkpoint:true}]; state.model_records={'runs/greetings/a':{decision:'Preferred',notes:'Model description',live_trials:50,live_correct:45,response_ms:900}};");
+  app.node('predict-run').value = 'runs/greetings/a';
+  app.node('live-mode').value = 'gesture';
+  app.node('live-settle-ms').value = '700';
+  app.node('live-missing-ms').value = '450';
+  app.node('live-frame-ms').value = '80';
+  app.run("showLiveResult({status:'prediction', probabilities:{afternoon:.8, evening:.2}}); openTestEditor('', 'live');");
+  assert.equal(app.node('record-test-name').value, 'Test 1');
+  assert.equal(app.node('record-notes').value, 'Model description');
+  assert.equal(app.node('record-live_trials').value, '');
+  assert.equal(app.node('record-live_correct').value, '');
+  assert.equal(app.node('record-response_ms').value, '');
+  app.node('record-live_trials').value = '10';
+  app.node('record-live_correct').value = '8';
+  app.context.fetch = async (url, options) => {
+    const payload = JSON.parse(options.body); requests.push([url, payload]);
+    const saved = {id:'test-1',run:payload.run,name:'Test 1',number:1,created_at:'2026-10-15T12:00:00',
+      model:{id:payload.run,name:'a',category:'greetings'},record:payload,prediction:payload.prediction};
+    return {ok:true,json:async()=>({prediction_tests:{'test-1':saved},test:saved})};
+  };
+  await app.run('saveModelRecord()');
+  assert.equal(requests[0][0], '/api/prediction-test');
+  assert.equal(requests[0][1].name, undefined, 'automatic name is allocated by the server');
+  assert.equal(requests[0][1].settle_ms, 700);
+  assert.equal(requests[0][1].live_correct, 8);
+  assert.deepEqual(requests[0][1].prediction.probabilities, {afternoon:.8,evening:.2});
+  assert.equal(app.run("modelRecord('runs/greetings/a').live_trials"), 50);
+  assert.equal(app.node('test-model-filter').value, 'runs/greetings/a');
+  assert.equal(app.node('run-preferred-only').checked, false);
+  await app.run('saveModelRecord()');
+  assert.equal(requests[1][1].id, 'test-1', 'saving again edits the existing test');
+  app.run("openTestEditor('', 'live')");
+  assert.equal(app.node('record-test-name').value, 'Test 2');
+  assert.equal(app.node('record-live_trials').value, '');
+});
+
+test('sample test attaches the model and sample used by the completed job', () => {
+  const app = dashboard();
+  app.run(`state.runs=[{id:'runs/greetings/a',name:'a',category:'greetings',checkpoint:true},
+    {id:'runs/colors/b',name:'b',category:'colors',checkpoint:true}];
+    jobs=[{id:'job-1',action:'predict',run:'runs/greetings/a',sample:'data/greetings/one.jpg',
+      category:'prediction',status:'completed',started:'2026-10-15T12:00:00',command:'predict',exit_code:0,
+      logs:['{"afternoon":0.9,"evening":0.1}']}]; renderJob();`);
+  app.node('predict-run').value = 'runs/colors/b';
+  app.run('controls()');
+  assert.equal(app.node('sample-save-test').disabled, true);
+  app.node('predict-run').value = 'runs/greetings/a';
+  app.run("controls(); openTestEditor('', 'sample');");
+  assert.equal(app.node('sample-save-test').disabled, false);
+  assert.equal(app.run('editingPrediction.sample'), 'data/greetings/one.jpg');
+  assert.equal(app.node('record-settle_ms').value, '');
+  assert.equal(app.node('record-mode').value, '');
+});
+
+test('saved test history shows frozen descriptions, escapes notes, and filters by model', () => {
+  const app = dashboard();
+  app.run(`state.runs=[{id:'runs/greetings/a',name:'a',category:'greetings'}];
+    state.prediction_tests={one:{id:'one',run:'runs/greetings/a',name:'Test <1>',number:1,
+      created_at:'2026-10-15T12:00:00',model:{name:'a',category:'greetings',metadata:{dataset:'original-dataset'}},
+      record:{notes:'<img src=x>',live_trials:10,live_correct:0,settle_ms:700}},
+    two:{id:'two',run:'runs/colors/b',name:'Other session',number:1,created_at:'2026-10-15T12:00:00',
+      model:{name:'b',category:'colors'},record:{}}}; renderRuns();`);
+  assert.match(app.node('prediction-tests').innerHTML, /original-dataset/);
+  assert.match(app.node('prediction-tests').innerHTML, /Test &lt;1&gt;/);
+  assert.match(app.node('prediction-tests').innerHTML, /0\.00%/);
+  assert.doesNotMatch(app.node('prediction-tests').innerHTML, /<img/);
+  app.node('test-model-filter').value = 'runs/greetings/a';
+  app.node('test-model-filter').handlers.change();
+  assert.doesNotMatch(app.node('prediction-tests').innerHTML, /Other session/);
+  app.run("openTestEditor('one')");
+  assert.equal(app.node('record-live_correct').value, 0);
+  assert.equal(app.node('record-notes').value, '<img src=x>');
+  assert.equal(app.node('record-test-name').value, 'Test <1>');
+});
+
+test('retrying a test restores its own settings instead of current model settings', async () => {
+  const app = dashboard();
+  app.run("state.runs=[{id:'runs/greetings/a',checkpoint:true}]; state.model_records={'runs/greetings/a':{settle_ms:1200,mode:'pose'}};");
+  await app.run("useRecordedRun('runs/greetings/a',{mode:'motion',settle_ms:350,missing_ms:250,frame_interval_ms:80})");
+  assert.equal(app.node('live-mode').value, 'motion');
+  assert.equal(Number(app.node('live-settle-ms').value), 350);
+  assert.equal(Number(app.node('live-missing-ms').value), 250);
+});
+
+test('failed test saves preserve the draft and a stale scan cannot replace a successful save', async () => {
+  const app = dashboard();
+  app.run("state.runs=[{id:'runs/greetings/a',name:'a',category:'greetings'}];");
+  app.node('predict-run').value = 'runs/greetings/a';
+  app.run("openTestEditor('', 'sample')");
+  app.node('record-notes').value = 'Keep this test draft';
+  app.context.fetch = async () => ({ok:false,json:async()=>({error:'Disk is full'})});
+  await app.run('saveModelRecord()');
+  assert.equal(app.node('record-notes').value, 'Keep this test draft');
+  assert.equal(app.node('model-record-error').textContent, 'Disk is full');
+  assert.equal(app.run('editingTest'), '');
+  let finishScan;
+  const saved = {id:'saved',run:'runs/greetings/a',name:'Test 1',number:1,created_at:'2026-10-15T12:00:00',
+    model:{name:'a',category:'greetings'},record:{notes:'Keep this test draft'}};
+  app.context.fetch = async url => url.startsWith('/api/state') ? new Promise(resolve=>{finishScan=resolve;})
+    : {ok:true,json:async()=>({prediction_tests:{saved},test:saved})};
+  const pending = app.run('scan()');
+  await app.run('saveModelRecord()');
+  finishScan({ok:true,json:async()=>({categories:[],runs:[{id:'runs/greetings/a',name:'a',category:'greetings'}],
+    prediction_tests:{},token:'test-token',python:'test'})});
+  await pending;
+  assert.equal(app.run('state.prediction_tests.saved.record.notes'), 'Keep this test draft');
+});
+
+test('record downloads use the server filename and display download failures', async () => {
+  const app = dashboard(), clicked = [];
+  app.context.URL = {createObjectURL:()=> 'blob:test', revokeObjectURL() {}};
+  app.context.document.body = {append() {}};
+  app.context.document.createElement = () => ({click(){clicked.push([this.href,this.download]);},remove(){}});
+  app.context.fetch = async () => ({ok:true,blob:async()=>({}),
+    headers:{get:()=> 'attachment; filename="greetings-a-record.json"'}});
+  await app.run("downloadRecord('/api/model-record/export?run=runs%2Fgreetings%2Fa')");
+  assert.deepEqual(clicked, [['blob:test','greetings-a-record.json']]);
+  app.context.fetch = async () => ({ok:false,json:async()=>({error:'Run not found'})});
+  await app.run("downloadRecord('/api/model-record/export?run=missing')");
+  assert.equal(app.node('notice').textContent, 'Run not found');
+});
+
+test('opening the test form reveals Model runs before scrolling to the editor', () => {
+  const app = dashboard();
+  const views = [{id:'view-predict',hidden:false},{id:'view-runs',hidden:true}];
+  app.context.location.hash = '#predict';
+  app.context.document.querySelectorAll = selector => selector === '.view' ? views : [];
+  app.run("state.runs=[{id:'runs/greetings/a',name:'a',category:'greetings'}];");
+  app.node('predict-run').value = 'runs/greetings/a';
+  app.node('model-record-editor').scrollIntoView = () => {
+    assert.equal(views[1].hidden, false, 'the target view must be visible before scrolling');
+  };
+  // Real Location objects normalize assignment to include the hash prefix.
+  let hash = '#predict';
+  Object.defineProperty(app.context.location, 'hash', {get:()=>hash,set:value=>{hash=value.startsWith('#')?value:'#'+value;}});
+  app.run("openTestEditor('', 'live')");
+  assert.equal(views[0].hidden, true);
+  assert.equal(views[1].hidden, false);
+});
+
+test('model actions include trained ZIP download and HUDYAT export eligibility', () => {
+  const app = dashboard();
+  app.run(`state.runs=[{id:'runs/alphabet/a',name:'a',category:'alphabet',checkpoint:true,
+    exports:{download:true,hudyat:true}}, {id:'runs/colors/arrays',name:'arrays',category:'colors',checkpoint:true,
+    exports:{download:true,hudyat:false,reason:'HUDYAT needs extraction metadata'}}]; renderRuns();`);
+  assert.match(app.node('all-runs').innerHTML, /Download model ZIP/);
+  assert.match(app.node('all-runs').innerHTML, /Export for HUDYAT/);
+  assert.match(app.node('all-runs').innerHTML, /HUDYAT needs extraction metadata/);
+  assert.match(app.node('all-runs').innerHTML, /data-export-model="runs\/colors\/arrays"[^>]*disabled/);
+  app.run("openModelExport('runs/alphabet/a')");
+  assert.equal(app.node('model-export-editor').hidden, false);
+  assert.match(app.node('model-export-title').textContent, /Alphabet \/ a/);
+  assert.equal(app.node('model-export-start').disabled, false);
+  app.run("jobs=[{status:'running'}]; controls();");
+  assert.equal(app.node('model-export-start').disabled, true);
+});
+
+test('HUDYAT export submits the selected model and custom detector through the job worker', async () => {
+  const app = dashboard(), requests = [];
+  app.run("state.runs=[{id:'runs/alphabet/test model',name:'test model',category:'alphabet',checkpoint:true,exports:{hudyat:true}}]; openModelExport('runs/alphabet/test model');");
+  app.node('export-hand-model').value = 'assets/custom detector.task';
+  app.context.fetch = async (url, options) => {
+    if (options?.method === 'POST') requests.push([url, JSON.parse(options.body)]);
+    return {ok:true,json:async()=>options?.method === 'POST' ? {id:'export-1'} : []};
+  };
+  app.node('model-export-form').handlers.submit({preventDefault(){}});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0][0], '/api/jobs');
+  assert.equal(requests[0][1].action, 'export');
+  assert.equal(requests[0][1].run, 'runs/alphabet/test model');
+  assert.equal(requests[0][1].hand_model, 'assets/custom detector.task');
+});
+
+test('an export rejection keeps the form and explains the detector mismatch', async () => {
+  const app = dashboard();
+  app.run("state.runs=[{id:'runs/alphabet/a',name:'a',category:'alphabet',checkpoint:true}]; openModelExport('runs/alphabet/a');");
+  app.context.fetch = async () => ({ok:false,json:async()=>({error:'The hand detector must match training.'})});
+  await app.run("startJob({action:'export',run:'runs/alphabet/a'})");
+  assert.equal(app.node('model-export-error').hidden, false);
+  assert.match(app.node('model-export-error').textContent, /must match training/);
+  assert.equal(app.node('model-export-editor').hidden, false);
+});
+
+test('Activity offers the bundle download only after a successful export', () => {
+  const app = dashboard();
+  app.run("jobs=[{id:'export-1',action:'export',category:'alphabet',run:'runs/alphabet/a',status:'running',started:'2026-10-15T12:00:00',exit_code:null,logs:[]}]; renderJob();");
+  assert.equal(app.node('download-export').hidden, true);
+  app.run("jobs[0].status='completed'; jobs[0].exit_code=0; renderJob();");
+  assert.equal(app.node('download-export').hidden, false);
+  assert.equal(app.node('download-export').dataset.id, 'export-1');
+  app.run("jobs[0].status='failed'; renderJob();");
+  assert.equal(app.node('download-export').hidden, true);
+});
+
+test('model ZIP and HUDYAT download actions encode identifiers correctly', async () => {
+  const app = dashboard();
+  app.context.downloaded = [];
+  app.run('downloadRecord = async path => downloaded.push(path)');
+  app.documentHandlers.click({target:{closest(selector){return selector === '[data-download-model-zip]'
+    ? {dataset:{downloadModelZip:'runs/alphabet/test model'}} : null;}}});
+  app.node('download-export').dataset.id = 'export-1';
+  app.node('download-export').handlers.click();
+  assert.deepEqual(app.context.downloaded, ['/api/model/download?run=runs%2Falphabet%2Ftest%20model', '/api/model/export/download?id=export-1']);
 });

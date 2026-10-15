@@ -92,3 +92,15 @@ python confusion_matrix.py --report "C:\path\to\webcam-test-alphabet.json" --out
 ```
 
 Start with five separately posed trials per static letter in consistent lighting. Repeat in another session to check whether errors persist. Use this baseline to decide which webcam examples to collect for a new training dataset; keep evaluation recordings separate from training. Neither the model weights nor their measured real-world accuracy have been changed by these diagnostics.
+
+## Versioned landmark preprocessing
+
+Camera inference follows the exported model's `preprocessing.normalization`.
+Older exports without this field keep their image-coordinate inputs.
+`hand-relative-sequence-v1` centers/scales per-frame hand shape and stores wrist
+movement in landmark 0 using one reference and median palm length per sequence.
+Raw landmarks remain available for the camera overlay and diagnostics.
+Train a fresh alphabet run with the new convention before exporting it; changing
+browser preprocessing alone cannot convert an older checkpoint.
+New exports include `camera-preprocessing-parity.json`, checked by the parity
+tool alongside the existing Keras/TensorFlow.js output comparison.

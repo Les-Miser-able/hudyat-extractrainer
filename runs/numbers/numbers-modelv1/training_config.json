@@ -1,0 +1,54 @@
+{
+  "command": "train",
+  "dataset": "C:\\Users\\Russel\\Desktop\\trainer\\datasets_augmented\\numbers\\dataset-20261014-142336",
+  "output": "C:\\Users\\Russel\\Desktop\\trainer\\runs\\numbers\\numbers-modelv1",
+  "epochs": 100,
+  "batch_size": 32,
+  "learning_rate": 0.001,
+  "patience": 12,
+  "seed": 42,
+  "class_weights": false,
+  "loader": "packed",
+  "resume_from": null,
+  "tensorflow_version": "2.21.0",
+  "split_counts": {
+    "test": {
+      "eight": 7,
+      "five": 7,
+      "four": 7,
+      "nine": 7,
+      "one": 7,
+      "seven": 7,
+      "six": 7,
+      "ten": 7,
+      "three": 7,
+      "two": 7
+    },
+    "train": {
+      "eight": 279,
+      "five": 297,
+      "four": 279,
+      "nine": 279,
+      "one": 279,
+      "seven": 288,
+      "six": 279,
+      "ten": 279,
+      "three": 279,
+      "two": 279
+    },
+    "validation": {
+      "eight": 7,
+      "five": 7,
+      "four": 7,
+      "nine": 7,
+      "one": 7,
+      "seven": 7,
+      "six": 7,
+      "ten": 7,
+      "three": 7,
+      "two": 7
+    }
+  },
+  "actual_optimizer_learning_rate": 0.0010000000474974513,
+  "data_loader": "packed"
+}

@@ -22,6 +22,7 @@ class Event(list):
 class DesktopWindowTests(unittest.TestCase):
     def setUp(self):
         self.webview = Mock(renderer="edgechromium")
+        self.webview.settings = {'ALLOW_DOWNLOADS': False}
         self.webview.create_window.return_value.events.closing = Event()
         self.webview.create_window.return_value.events.initialized = Event()
         self.webview.create_window.return_value.events.before_show = Event()
@@ -38,6 +39,7 @@ class DesktopWindowTests(unittest.TestCase):
         self.webview.start.side_effect = lambda **kw: self.assertIs(
             threading.current_thread(), threading.main_thread())
         DesktopWindow().run('http://localhost:8091', jobs)
+        self.assertTrue(self.webview.settings['ALLOW_DOWNLOADS'])
         self.webview.create_window.assert_called_once_with(
             'FSL Studio', 'http://localhost:8091', width=1280, height=850,
             min_size=(800, 600), resizable=True, background_color='#f6f7f9', text_select=True)

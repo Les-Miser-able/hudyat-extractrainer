@@ -9,6 +9,26 @@ import categories as c
 
 
 class CategoryTests(unittest.TestCase):
+    def test_raw_alphabet_defaults_do_not_change_other_category_commands(self):
+        from fsl_trainer.data.preprocessing import HAND_RELATIVE
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for category in ['alphabet', 'colors', 'numbers', 'greetings', 'family', 'shapes']:
+                folder = root / 'data' / category / 'gesture'
+                folder.mkdir(parents=True)
+                (folder / 'one.jpg').touch()
+            args = self.options(root, jitter=None)
+            jobs, _ = c.build_jobs(args)
+            for category, _, command in jobs:
+                if category == 'alphabet':
+                    self.assertEqual(command[command.index('--normalization') + 1], HAND_RELATIVE)
+                    self.assertEqual(command[command.index('--jitter') + 1], '0.03')
+                else:
+                    self.assertNotIn('--normalization', command)
+                    self.assertEqual(command[command.index('--jitter') + 1], '0.0075')
+            args.normalization = 'image'
+            self.assertTrue(all('--normalization' not in command for _, _, command in c.build_jobs(args)[0]))
+
     def options(self, root, **extra):
         options = dict(command="prepare", data=str(root/"data"), datasets=str(root/"datasets"),
                        runs=str(root/"runs"), category=None, all=True, seed=42,

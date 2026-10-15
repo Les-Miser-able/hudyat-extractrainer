@@ -10,6 +10,9 @@ let folderCategory = '';
 let modelRecordsVersion = 0;
 let liveStream = null, liveSession = '', liveActive = false, liveVersion = 0, liveTimer = null;
 let liveCaptureVersion = 0, liveResetting = false;
+let predictionTestsVersion = 0, editingTest = null, editingPrediction = null, suggestedTestName = '';
+const latestPredictions = {sample: null, live: null};
+let exportingRun = '';
 
 function notice(message, error = false) {
   $('notice').textContent = message;
@@ -21,8 +24,8 @@ async function api(path, body) {
     method: 'POST', headers: {'Content-Type': 'application/json', 'X-Dashboard-Token': token}, body: JSON.stringify(body)
   });
   const result = await response.json();
-  if (response.status === 404 && path === '/api/model-record') {
-    throw new Error('Restart dashboard.py and refresh the page to enable saved model records.');
+  if (response.status === 404 && ['/api/model-record', '/api/prediction-test'].includes(path)) {
+    throw new Error('Restart dashboard.py and refresh the page to enable saved model records and prediction tests.');
   }
   if (response.status === 404 && path.startsWith('/api/live/')) {
     throw new Error('Live prediction is unavailable in the running server. Finish any running job, restart dashboard.py, then refresh this page.');
@@ -136,22 +139,31 @@ function modelRecordsTable(rows) {
     <td><strong>${recordPercent(r.accuracy)}</strong><small>Test accuracy</small><small>Macro F1: ${recordPercent(r.f1)}</small></td>
     <td><span>${escapeHTML(mode)}</span><small>Stillness: ${recordValue(record.settle_ms)} ms</small><small>Hands missing: ${recordValue(record.missing_ms)} ms</small><small>Frame interval: ${recordValue(record.frame_interval_ms)} ms</small><small>Live accuracy: ${recordPercent(liveAccuracy)}</small>${record.live_trials ? `<small>${recordValue(record.live_correct)} / ${recordValue(record.live_trials)} correct</small>` : ''}<small>Response: ${recordValue(record.response_ms)} ms</small>${record.tested_on ? `<small>Tested: ${escapeHTML(record.tested_on)}</small>` : ''}</td>
     <td><div class="record-notes">${escapeHTML(record.notes || 'No notes yet.')}</div>${record.device ? `<small>Device / session: ${escapeHTML(record.device)}</small>` : ''}</td>
-    <td><div class="record-actions"><button type="button" class="button secondary" data-record-run="${escapeHTML(r.id)}">Edit record</button><button type="button" class="button secondary" data-test-run="${escapeHTML(r.id)}" ${r.checkpoint ? '' : 'disabled'}>Try model</button></div></td></tr>`;
+    <td><div class="record-actions"><button type="button" class="button secondary" data-record-run="${escapeHTML(r.id)}">Edit record</button><button type="button" class="button secondary" data-test-run="${escapeHTML(r.id)}" ${r.checkpoint ? '' : 'disabled'}>Try model</button><button type="button" class="button secondary" data-history-run="${escapeHTML(r.id)}">Test history (${Object.values(state.prediction_tests || {}).filter(t => t.run === r.id).length})</button><button type="button" class="button secondary" data-download-model="${escapeHTML(r.id)}">Download record</button><button type="button" class="button secondary" data-download-model-zip="${escapeHTML(r.id)}" ${(r.exports?.download ?? r.checkpoint) ? '' : 'disabled'}>Download model ZIP</button><button type="button" class="button secondary export-model-action" data-export-model="${escapeHTML(r.id)}" data-available="${Boolean(r.exports?.hudyat ?? r.checkpoint)}" title="${escapeHTML(r.exports?.reason || 'Create a browser model bundle for HUDYAT')}" ${(r.exports?.hudyat ?? r.checkpoint) ? '' : 'disabled'}>Export for HUDYAT</button></div></td></tr>`;
   }).join('')}</tbody></table>`;
 }
 let editingRecord = '', recordSaving = false;
 const recordFields = ['decision', 'mode', 'settle_ms', 'missing_ms', 'frame_interval_ms', 'live_trials', 'live_correct', 'response_ms', 'tested_on', 'device', 'notes'];
 const recordNumbers = ['settle_ms', 'missing_ms', 'frame_interval_ms', 'live_trials', 'live_correct', 'response_ms'];
 function editModelRecord(id) {
+  if (recordSaving) return;
   const run = state.runs.find(r => r.id === id);
   if (!run) return;
   editingRecord = id;
+  editingTest = null;
+  editingPrediction = null;
+  $('record-test-name-field').hidden = true;
+  $('record-decision-field').hidden = false;
+  $('model-record-save').textContent = 'Save record';
+  $('model-record-description').textContent = 'Save your decision, tested slider values, and live observations.';
+  $('model-record-hint').textContent = 'Choosing Preferred replaces your previous preferred run for this category. These records remain after restarting the dashboard.';
   const record = modelRecord(id);
   $('model-record-title').textContent = `Record: ${title(run.category)} / ${run.name}`;
   for (const name of recordFields) $('record-' + name).value = record[name] ?? (name === 'decision' ? 'Not tested' : '');
   $('model-record-error').hidden = true;
   $('model-record-editor').hidden = false;
   $('model-record-editor').scrollIntoView({behavior: 'smooth', block: 'start'});
+  renderTestControls();
 }
 async function persistModelRecord(payload) {
   if (recordSaving) return false;
@@ -173,7 +185,26 @@ async function saveModelRecord() {
   }
   $('model-record-error').hidden = true;
   try {
-    if (await persistModelRecord(payload)) notice('Model record saved. Preferred selections and notes will remain after restarting.');
+    if (editingTest !== null) {
+      const name = $('record-test-name').value;
+      if (editingTest || name !== suggestedTestName) payload.name = name;
+      payload.prediction = editingPrediction;
+      if (editingTest) payload.id = editingTest;
+      recordSaving = true; controls();
+      try {
+        const result = await api('/api/prediction-test', payload);
+        state.prediction_tests = result.prediction_tests;
+        ++predictionTestsVersion;
+        editingTest = result.test.id;
+        $('record-test-name').value = result.test.name;
+        $('model-record-title').textContent = `${result.test.name} · ${result.test.model.name}`;
+        $('run-filter').value = result.test.model.category;
+        $('run-preferred-only').checked = false;
+        $('test-model-filter').value = result.test.run;
+        renderRuns();
+        notice(`${result.test.name} saved as a separate prediction test. Download it from Prediction test runs.`);
+      } finally { recordSaving = false; controls(); }
+    } else if (await persistModelRecord(payload)) notice('Model record saved. Preferred selections and notes will remain after restarting.');
   } catch (error) {
     $('model-record-error').textContent = error.message;
     $('model-record-error').hidden = false;
@@ -191,10 +222,10 @@ async function recordCameraSettings() {
       frame_interval_ms: liveFrameInterval(), mode: $('live-mode').value})) notice('Current camera settings recorded for the selected model. Review them under Model runs.');
   } catch (error) { notice(error.message, true); }
 }
-async function useRecordedRun(id) {
+async function useRecordedRun(id, settings = null) {
   if (!state.runs.some(r => r.id === id && r.checkpoint)) return;
   if (liveActive) await stopLive();
-  const record = modelRecord(id);
+  const record = settings || modelRecord(id);
   $('predict-run').value = id;
   if (record.mode) $('live-mode').value = record.mode;
   for (const [name, control] of [['settle_ms','live-settle-ms'], ['missing_ms','live-missing-ms'], ['frame_interval_ms','live-frame-ms']]) {
@@ -210,6 +241,93 @@ function renderRuns() {
     && (!preferredOnly || modelRecord(r.id).decision === 'Preferred'));
   $('all-runs').innerHTML = modelRecordsTable(rows);
   $('run-record-summary').textContent = `${rows.length} saved runs shown. Preferred models are selected manually, one per category.`;
+  renderTestHistory();
+}
+function nextTestNumber(run) {
+  return Math.max(0, ...Object.values(state.prediction_tests || {}).filter(t => t.run === run).map(t => t.number)) + 1;
+}
+function modelDescription(model) {
+  const m = model.metadata || {}, t = m.training || {}, p = m.preparation || {}, counts = m.split_counts || {};
+  return `<details><summary>Model details saved with this test</summary><p>Dataset: ${escapeHTML(m.dataset || 'Not recorded')}<br>Source folders: ${escapeHTML((m.source_folders || []).join(', ') || 'Not recorded')}<br>Input: ${recordValue(m.input_kind)} · Originals: ${recordValue(m.original_sources)} · Selected: ${recordValue(m.selected_sources)}<br>Train / validation / test: ${recordValue(counts.train)} / ${recordValue(counts.validation)} / ${recordValue(counts.test)}<br>Epochs recorded / max: ${recordValue(m.epochs_recorded)} / ${recordValue(t.epochs)}<br>Batch: ${recordValue(t.batch_size)} · LR: ${recordValue(t.learning_rate)}<br>Patience: ${recordValue(t.patience)} · Seed: ${recordValue(t.seed)} · Class weights: ${t.class_weights == null ? '—' : t.class_weights ? 'Yes' : 'No'}<br>Static variants: ${recordValue(p.static_variants)} · Jitter: ${recordValue(p.jitter_std)}<br>Video extras: ${recordValue(p.video_extra_samples)} · Warp: ${recordValue(p.video_time_warp)}<br>Detection confidence: ${recordValue(p.detection_confidence)}${t.resume_from ? `<br>Resumed: ${escapeHTML(t.resume_from)}` : ''}<br>Offline test accuracy: ${recordPercent(model.accuracy)} · Macro F1: ${recordPercent(model.f1)}<br>Classes: ${escapeHTML((model.class_labels || []).join(', '))}${model.record?.notes ? `<br>Model notes: ${escapeHTML(model.record.notes)}` : ''}</p></details>`;
+}
+function renderTestHistory() {
+  const all = Object.values(state.prediction_tests || {});
+  const models = new Map([...state.runs.map(r => [r.id, r]), ...all.map(t => [t.run, t.model])]);
+  populate($('test-model-filter'), [['', 'All models'], ...[...models].map(([id, m]) => [id, `${title(m.category)} / ${m.name}`])], 'All models');
+  const filter = $('run-filter').value, model = $('test-model-filter').value;
+  const rows = all.filter(t => (!model || t.run === model) && (!filter || t.model.category === filter)
+    && (!$('run-preferred-only').checked || modelRecord(t.run).decision === 'Preferred'))
+    .sort((a, b) => b.created_at.localeCompare(a.created_at) || b.number - a.number);
+  $('prediction-test-summary').textContent = `${rows.length} saved prediction tests shown. Each test keeps its own model description and observations.`;
+  $('prediction-tests').innerHTML = rows.length ? `<table class="prediction-test-table"><thead><tr><th>Test / model</th><th>Tested settings</th><th>Live results</th><th>Saved prediction</th><th>Notes</th><th>Actions</th></tr></thead><tbody>${rows.map(test => {
+    const r = test.record, prediction = test.prediction;
+    const ranked = Object.entries(prediction?.probabilities || {}).sort((a, b) => b[1] - a[1]);
+    return `<tr><td><strong>${escapeHTML(test.name)}</strong><small>${escapeHTML(title(test.model.category))} / ${escapeHTML(test.model.name)}</small><small>Saved: ${escapeHTML(test.created_at.replace('T', ' '))}</small>${modelDescription(test.model)}</td><td>${escapeHTML({motion:'Moving gesture', gesture:'Perform once', pose:'Held pose'}[r.mode] || 'Not recorded')}<small>Stillness: ${recordValue(r.settle_ms)} ms</small><small>Hands missing: ${recordValue(r.missing_ms)} ms</small><small>Frame interval: ${recordValue(r.frame_interval_ms)} ms</small></td><td>${recordPercent(r.live_trials && r.live_correct != null ? r.live_correct / r.live_trials : null)}<small>${recordValue(r.live_correct)} / ${recordValue(r.live_trials)} correct</small><small>Median recognition: ${recordValue(r.response_ms)} ms</small><small>Tested: ${recordValue(r.tested_on)}</small></td><td>${ranked.length ? `${escapeHTML(ranked[0][0])} · ${percent(ranked[0][1])}<small>${prediction.source === 'live' ? 'Live camera' : 'Sample file'} · ${escapeHTML(prediction.captured_at.replace('T', ' '))}</small>${prediction.sample ? `<small>${escapeHTML(prediction.sample)}</small>` : ''}` : 'No prediction attached'}</td><td><div class="record-notes">${escapeHTML(r.notes || 'No notes yet.')}</div><small>${escapeHTML(r.device || '')}</small></td><td><div class="record-actions"><button class="button secondary" type="button" data-edit-test="${escapeHTML(test.id)}">Edit test</button><button class="button secondary" type="button" data-download-test="${escapeHTML(test.id)}">Download test</button><button class="button secondary" type="button" data-retry-test="${escapeHTML(test.id)}" ${state.runs.some(m => m.id === test.run && m.checkpoint) ? '' : 'disabled'}>Try these settings</button></div></td></tr>`;
+  }).join('')}</tbody></table>` : empty('No saved prediction tests match these filters. Try a model, then choose Save as test run.');
+  renderTestControls();
+}
+function renderTestControls() {
+  const run = $('predict-run').value;
+  $('live-save-test').disabled = recordSaving || !token || !run;
+  $('sample-save-test').disabled = recordSaving || !token || latestPredictions.sample?.run !== run;
+  $('prediction-test-next').textContent = run ? `Next saved run: Test ${nextTestNumber(run)}. Add trial counts, recognition time, and notes when saving.` : '';
+  $('record-test-name').required = editingTest !== null;
+  $('model-record-close').disabled = recordSaving;
+  $('model-record-copy').disabled = recordSaving;
+}
+function openTestEditor(id = '', source = 'live') {
+  if (recordSaving) return;
+  const saved = state.prediction_tests?.[id];
+  const run = saved?.run || $('predict-run').value;
+  const model = saved?.model || state.runs.find(r => r.id === run);
+  if (!model) return;
+  editingRecord = run;
+  editingTest = saved?.id || '';
+  const latest = latestPredictions[source];
+  const attached = latest?.run === run ? latest : null;
+  editingPrediction = saved ? saved.prediction : attached?.prediction || null;
+  const record = saved ? saved.record : {...modelRecord(run), decision: 'Testing',
+    live_trials: null, live_correct: null, response_ms: null,
+    tested_on: new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10),
+    ...(source === 'live' ? (attached?.settings || {...liveTiming(), frame_interval_ms: liveFrameInterval(), mode: $('live-mode').value})
+      : {settle_ms: null, missing_ms: null, frame_interval_ms: null, mode: null})};
+  for (const name of recordFields) $('record-' + name).value = record[name] ?? (name === 'decision' ? 'Testing' : '');
+  $('record-test-name').value = saved?.name || `Test ${nextTestNumber(run)}`;
+  suggestedTestName = $('record-test-name').value;
+  $('record-test-name-field').hidden = false;
+  $('record-decision-field').hidden = true;
+  $('model-record-title').textContent = `${$('record-test-name').value} · ${title(model.category)} / ${model.name}`;
+  $('model-record-description').textContent = 'Save a separate test run with this model’s description, settings, and observations.';
+  $('model-record-hint').textContent = 'Trial counts and recognition time are manual measurements. Leave unmeasured fields blank. Saving again updates this test; Save as test run starts a new numbered test.';
+  $('model-record-save').textContent = 'Save test run';
+  $('model-record-error').hidden = true;
+  $('model-record-editor').hidden = false;
+  location.hash = 'runs';
+  route();
+  renderTestControls();
+  $('model-record-editor').scrollIntoView({behavior: 'smooth', block: 'start'});
+}
+async function downloadRecord(path) {
+  try {
+    const response = await fetch(path, {cache: 'no-store'});
+    if (!response.ok) throw new Error((await response.json()).error || 'Could not download the record.');
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = response.headers.get('Content-Disposition')?.match(/filename="([^"]+)"/)?.[1] || 'model-record.json';
+    document.body.append(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (error) { notice(error.message, true); }
+}
+function openModelExport(id) {
+  const run = state.runs.find(r => r.id === id);
+  if (!run || !(run.exports?.hudyat ?? run.checkpoint)) return;
+  exportingRun = id;
+  $('model-export-title').textContent = `Export for HUDYAT: ${title(run.category)} / ${run.name}`;
+  $('model-export-error').hidden = true;
+  $('model-export-editor').hidden = false;
+  controls();
+  $('model-export-editor').scrollIntoView({behavior: 'smooth', block: 'start'});
 }
 function renderDatasets() {
   const search = $('category-search').value.toLowerCase();
@@ -220,11 +338,13 @@ function renderDatasets() {
 async function scan() {
   const version = ++scanVersion;
   const recordsVersion = modelRecordsVersion;
+  const testsVersion = predictionTestsVersion;
   loading = true; controls();
   try {
     const next = await api(`/api/state?data=${encodeURIComponent($('data-root').value)}&datasets=${encodeURIComponent($('dataset-root').value)}`);
     if (version !== scanVersion) return;
     if (recordsVersion !== modelRecordsVersion) next.model_records = state.model_records;
+    if (testsVersion !== predictionTestsVersion) next.prediction_tests = state.prediction_tests;
     state = next; token = next.token; render();
   } catch (error) { notice(error.message, true); }
   finally { if (version === scanVersion) { loading = false; controls(); } }
@@ -232,6 +352,10 @@ async function scan() {
 function controls() {
   const active = jobs.some(j => j.status === 'running');
   document.querySelectorAll('.submit-job').forEach(b => { b.disabled = loading || submitting || active || liveActive || !token; });
+  document.querySelectorAll('.export-model-action').forEach(b => {
+    b.disabled = loading || submitting || active || liveActive || !token || b.dataset.available !== 'true';
+  });
+  $('model-export-start').disabled ||= !state.runs.some(r => r.id === exportingRun && (r.exports?.hudyat ?? r.checkpoint));
   $('train-form').querySelector('[type="submit"]').disabled ||= !preparedChoices().some(d => d.path === $('train-dataset').value);
   datasetPaths();
   $('live-start').disabled = loading || submitting || active || liveActive || !token || !$('predict-run').value;
@@ -242,6 +366,7 @@ function controls() {
   $('live-next').disabled = !liveActive || !liveSession || liveResetting;
   $('model-record-save').disabled = recordSaving || !token;
   $('live-record').disabled = recordSaving || !token || !$('predict-run').value;
+  renderTestControls();
   const category = state.categories.find(c => c.name === $('prepare-form').elements.category.value);
   const selection = sourceSelection();
   const filtered = selection.source_folders !== null || selection.videos_only;
@@ -268,6 +393,7 @@ async function startJob(data) {
   if (submitting) return;
   submitting = true; controls(); notice('');
   if (data.action === 'prepare') $('prepare-error').hidden = true;
+  if (data.action === 'export') $('model-export-error').hidden = true;
   try {
     await api('/api/jobs', {data: $('data-root').value, datasets: $('dataset-root').value, ...data,
       ...(data.action === 'prepare' ? sourceSelection() : {})});
@@ -280,6 +406,10 @@ async function startJob(data) {
       await scan();
       $('prepare-error').textContent = error.message;
       $('prepare-error').hidden = false;
+    }
+    if (data.action === 'export') {
+      $('model-export-error').textContent = error.message;
+      $('model-export-error').hidden = false;
     }
   }
   finally { submitting = false; controls(); }
@@ -295,6 +425,8 @@ function renderJob() {
   if (log.textContent !== content) { log.textContent = content; if (nearBottom) log.scrollTop = log.scrollHeight; }
   $('cancel-job').hidden = job.status !== 'running';
   $('cancel-job').dataset.id = job.id;
+  $('download-export').hidden = job.action !== 'export' || job.status !== 'completed';
+  $('download-export').dataset.id = job.id;
   const prediction = jobs.find(j => j.action === 'predict' && j.status === 'completed');
   if (prediction) {
     const output = prediction.logs.join('\n');
@@ -304,13 +436,15 @@ function renderJob() {
       const ranked = Object.entries(result).filter(([, v]) => typeof v === 'number').sort((a, b) => b[1] - a[1]);
       if (ranked.length) {
         const [label, confidence] = ranked[0];
+        latestPredictions.sample = {run: prediction.run, prediction: {source: 'sample',
+          sample: prediction.sample || '', captured_at: prediction.started, probabilities: Object.fromEntries(ranked)}};
         $('prediction-result').className = '';
         $('prediction-result').innerHTML = `<div class="prediction-main">${escapeHTML(label)}</div><div class="prediction-confidence">${percent(confidence)} model confidence · ${escapeHTML(prediction.started.replace('T', ' '))}</div>${ranked.slice(0, 5).map(([name, score]) => `<div class="prediction-row"><span>${escapeHTML(name)}</span><meter min="0" max="1" value="${score}" aria-label="${escapeHTML(name)} confidence"></meter><span>${percent(score)}</span></div>`).join('')}<p class="hint">Model scores can be wrong. Verify the sign before relying on a prediction.</p>`;
       }
     } catch { /* Non-JSON worker output is still available in the activity log. */ }
   }
 }
-function showLiveResult(result) {
+function showLiveResult(result, settings = null) {
   $('live-status').textContent = result.message || 'Live prediction running.';
   if (result.status !== 'prediction') {
     if (!result.keep_result) $('live-result').replaceChildren();
@@ -319,6 +453,10 @@ function showLiveResult(result) {
   const ranked = Object.entries(result.probabilities).sort((a, b) => b[1] - a[1]);
   if (!ranked.length) return;
   const [label, confidence] = ranked[0];
+  latestPredictions.live = {run: $('predict-run').value,
+    settings: settings || {...liveTiming(), frame_interval_ms: liveFrameInterval(), mode: $('live-mode').value},
+    prediction: {source: 'live', sample: '', captured_at: new Date().toISOString(), probabilities: result.probabilities}};
+  renderTestControls();
   $('live-result').innerHTML = `<div class="prediction-main">${escapeHTML(label)}</div><div class="prediction-confidence">${percent(confidence)} model confidence${confidence < .6 ? ' · Uncertain' : ''}</div>${ranked.slice(0, 5).map(([name, score]) => `<div class="prediction-row"><span>${escapeHTML(name)}</span><meter min="0" max="1" value="${score}"></meter><span>${percent(score)}</span></div>`).join('')}`;
 }
 function liveTiming() {
@@ -352,10 +490,12 @@ async function liveFrame(version) {
     canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
     canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
     canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+    const settings = {...liveTiming(), frame_interval_ms: liveFrameInterval(), mode: $('live-mode').value};
     const result = await api('/api/live/frame', {session: liveSession,
-      image: canvas.toDataURL('image/jpeg', .8), timestamp: performance.now(), timing: liveTiming()});
+      image: canvas.toDataURL('image/jpeg', .8), timestamp: performance.now(),
+      timing: {settle_ms: settings.settle_ms, missing_ms: settings.missing_ms}});
     if (version !== liveVersion) return;
-    if (captureVersion === liveCaptureVersion) showLiveResult(result);
+    if (captureVersion === liveCaptureVersion) showLiveResult(result, settings);
     // Keep requests serial and count processing time toward the frame interval.
     const delay = Math.max(0, liveFrameInterval() - (performance.now() - frameStartedAt));
     liveTimer = setTimeout(() => liveFrame(version), delay);
@@ -368,6 +508,7 @@ async function liveFrame(version) {
 async function startLive() {
   if (liveActive) return;
   const version = ++liveVersion;
+  latestPredictions.live = null;
   liveActive = true; controls();
   $('live-result').replaceChildren();
   $('live-status').textContent = 'Requesting camera access…';
@@ -418,6 +559,7 @@ async function stopLive() {
 async function nextGesture() {
   if (!liveSession || liveResetting) return;
   const version = liveVersion;
+  latestPredictions.live = null;
   ++liveCaptureVersion;
   liveResetting = true; controls();
   $('live-result').replaceChildren();
@@ -445,7 +587,9 @@ async function pollJobs() {
     const status = jobs[0] ? `${jobs[0].id}:${jobs[0].status}` : '';
     if (status !== previousJobStatus && jobs[0] && ['completed', 'failed', 'cancelled'].includes(jobs[0].status)) {
       if (jobs[0].status === 'failed') notice('The job failed. Check the activity log for the worker’s error and dependency details.', true);
-      if (jobs[0].status === 'completed') notice(`${title(jobs[0].action)} completed. Project data has been refreshed.`);
+      if (jobs[0].status === 'completed') notice(jobs[0].action === 'export'
+        ? 'HUDYAT bundle ready. Use Download HUDYAT bundle in Activity, then follow its import instructions.'
+        : `${title(jobs[0].action)} completed. Project data has been refreshed.`);
       await scan();
     }
     previousJobStatus = status;
@@ -493,6 +637,27 @@ for (const [id, action] of [['prepare-form', 'prepare'], ['train-form', 'train']
   });
 }
 document.addEventListener('click', event => {
+  const downloadModelZip = event.target.closest('[data-download-model-zip]');
+  if (downloadModelZip) downloadRecord(`/api/model/download?run=${encodeURIComponent(downloadModelZip.dataset.downloadModelZip)}`);
+  const exportModel = event.target.closest('[data-export-model]');
+  if (exportModel) openModelExport(exportModel.dataset.exportModel);
+  const history = event.target.closest('[data-history-run]');
+  if (history) {
+    $('test-model-filter').value = history.dataset.historyRun;
+    renderTestHistory();
+    $('prediction-tests-section').scrollIntoView({behavior: 'smooth', block: 'start'});
+  }
+  const downloadModel = event.target.closest('[data-download-model]');
+  if (downloadModel) downloadRecord(`/api/model-record/export?run=${encodeURIComponent(downloadModel.dataset.downloadModel)}`);
+  const downloadTest = event.target.closest('[data-download-test]');
+  if (downloadTest) downloadRecord(`/api/prediction-test/export?id=${encodeURIComponent(downloadTest.dataset.downloadTest)}`);
+  const editTest = event.target.closest('[data-edit-test]');
+  if (editTest) openTestEditor(editTest.dataset.editTest);
+  const retryTest = event.target.closest('[data-retry-test]');
+  if (retryTest) {
+    const test = state.prediction_tests?.[retryTest.dataset.retryTest];
+    if (test) useRecordedRun(test.run, test.record);
+  }
   const record = event.target.closest('[data-record-run]');
   if (record) editModelRecord(record.dataset.recordRun);
   const tryRun = event.target.closest('[data-test-run]');
@@ -517,6 +682,15 @@ $('source-folder-options').addEventListener('change', controls);
 $('source-videos-only').addEventListener('change', controls);
 $('run-filter').addEventListener('change', renderRuns);
 $('run-preferred-only').addEventListener('change', renderRuns);
+$('model-export-form').addEventListener('submit', event => {
+  event.preventDefault();
+  if (exportingRun) startJob({action:'export', run:exportingRun, hand_model:$('export-hand-model').value});
+});
+$('model-export-close').addEventListener('click', () => { $('model-export-editor').hidden = true; });
+$('download-export').addEventListener('click', () => downloadRecord(`/api/model/export/download?id=${encodeURIComponent($('download-export').dataset.id)}`));
+$('test-model-filter').addEventListener('change', renderTestHistory);
+$('live-save-test').addEventListener('click', () => openTestEditor('', 'live'));
+$('sample-save-test').addEventListener('click', () => openTestEditor('', 'sample'));
 $('model-record-form').addEventListener('submit', event => { event.preventDefault(); saveModelRecord(); });
 $('model-record-close').addEventListener('click', () => { $('model-record-editor').hidden = true; });
 $('model-record-copy').addEventListener('click', copyCameraSettings);

@@ -1,0 +1,48 @@
+{
+  "frames": 32,
+  "features": 128,
+  "layout": [
+    "left_xyz_landmarks_0_to_20",
+    "right_xyz_landmarks_0_to_20",
+    "left_present",
+    "right_present"
+  ],
+  "coordinates": "landmarks 1-20: per-frame wrist-relative pixels / pixel palm length; landmark 0: wrist displacement from first valid frame / median pixel palm length",
+  "interpolation": "linear coordinates, nearest binary flags, absent coordinates zeroed",
+  "seed": 42,
+  "validation_fraction": 0.15,
+  "test_fraction": 0.15,
+  "static_variants": 8,
+  "jitter_std": 0.03,
+  "static_method": "one clean original; training-only repeat + Gaussian noise in palm lengths",
+  "grouping": "source path with Roboflow .rf. siblings grouped",
+  "normalization": "hand-relative-sequence-v1",
+  "pose_augmentation": {
+    "split": "train",
+    "rotation_degrees": 15.0,
+    "mirror_probability": 0.5
+  },
+  "evaluation": "one unaugmented sequence per accepted source",
+  "video_augmentation": {
+    "version": 1,
+    "algorithm": "piecewise_linear_timing",
+    "eligible_inputs": "videos_and_multi_frame_landmarks",
+    "split": "train",
+    "extra_samples": 8,
+    "max_displacement": 0.05,
+    "seed": 42,
+    "max_attempts_per_sample": 10
+  },
+  "extraction": {
+    "backend": "MediaPipe HandLandmarker",
+    "mediapipe_version": "1.0.1",
+    "model_sha256": "fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1",
+    "model_url": "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+    "num_hands": 2,
+    "detection_confidence": 0.5,
+    "swap_hands": false,
+    "normalization": "MediaPipe image landmarks: x/width, y/height, wrist-relative z at x scale",
+    "image_orientation": "EXIF transpose; no horizontal flip",
+    "video_timeline": "all decoded frames, constant FPS timeline; missing frames zero-filled"
+  }
+}

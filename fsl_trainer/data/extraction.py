@@ -12,6 +12,7 @@ import shutil
 import tempfile
 import urllib.request
 import numpy as np
+from .preprocessing import IMAGE, HAND_RELATIVE, COORDINATES, preparation_normalization, preprocess_sequence
 
 from .source_selection import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, SUPPORTED, source_files, folder_selection
 MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
@@ -70,7 +71,8 @@ def pack_result(result, swap_hands=False):
 
 
 class Extractor:
-    def __init__(self, model=DEFAULT_MODEL, confidence=0.5, swap_hands=False):
+    def __init__(self, model=DEFAULT_MODEL, confidence=0.5, swap_hands=False, normalization=IMAGE):
+        self.normalization = preparation_normalization(normalization)
         if not np.isfinite(confidence) or not 0 <= confidence <= 1:
             raise ValueError("Detection confidence must be between 0 and 1")
         try:
@@ -104,6 +106,7 @@ class Extractor:
                     raise ValueError("Animated/multipage images are unsupported; use a video")
                 rgb = np.array(self.ImageOps.exif_transpose(image).convert("RGB"))
             x = pack_result(self.image_detector.detect(self.image(rgb)), self.swap_hands)[None]
+            x = preprocess_sequence(x, rgb.shape[1], rgb.shape[0], self.normalization)
             if not x[:, 126:].any():
                 raise ValueError("No hand detected")
             return x, {"kind": "image", "frames": 1, "detected_frames": 1}
@@ -135,7 +138,7 @@ class Extractor:
                 raise ValueError("Video must contain at least two decodable frames")
             if expected > 0 and len(frames) < expected:
                 raise ValueError(f"Video ended early: decoded {len(frames)} of {expected} declared frames")
-            x = np.stack(frames)
+            x = preprocess_sequence(np.stack(frames), rgb.shape[1], rgb.shape[0], self.normalization)
             detected = int(np.any(x[:, 126:] > 0, axis=1).sum())
             if not detected:
                 raise ValueError("No hand detected in any video frame")
@@ -177,6 +180,10 @@ def prepare_media(args, prepare_landmarks):
     videos_only = getattr(args, "videos_only", False)
     filtered = selected is not None or videos_only
     all_files = [p for folder in folders for p in source_files(folder, selected, videos_only)]
+    normalization = getattr(args, "normalization", IMAGE)
+    if normalization == HAND_RELATIVE and any(p.suffix.lower() == ".npy" for p in all_files):
+        raise ValueError("Hand-relative preparation needs raw images/videos with known frame dimensions; "
+                         "do not mix supplied .npy landmarks into this dataset")
     excluded_classes = [folder.name for folder in folders
                         if not source_files(folder, selected, videos_only)] if filtered else []
     if filtered:
@@ -207,9 +214,10 @@ def prepare_media(args, prepare_landmarks):
                                       "selected_files": len(all_files), "excluded_classes": excluded_classes}
     if ignored:
         print(f"Ignoring {len(ignored)} unsupported files; details will be in the extraction report.", flush=True)
+    feature_options = {"normalization": normalization} if normalization != IMAGE else {}
     extractor = Extractor(model=getattr(args, "hand_model", None) or DEFAULT_MODEL,
                           confidence=getattr(args, "detection_confidence", 0.5),
-                          swap_hands=getattr(args, "swap_hands", False))
+                          swap_hands=getattr(args, "swap_hands", False), **feature_options)
     try:
         with temporary_landmarks() as temp:
             stage = Path(temp) / "landmarks"
@@ -275,7 +283,7 @@ def prepare_media(args, prepare_landmarks):
                 "image_orientation": "EXIF transpose; no horizontal flip",
                 "video_timeline": "all decoded frames, constant FPS timeline; missing frames zero-filled"}
             metadata["grouping"] = "raw source CSV" if mapping else "source path with Roboflow .rf. siblings grouped"
-            metadata["coordinates"] = metadata["extraction"]["normalization"]
+            metadata["coordinates"] = COORDINATES if normalization == HAND_RELATIVE else metadata["extraction"]["normalization"]
             if filtered:
                 metadata["source_selection"] = report["source_selection"]
             save_json(output / "preprocessing.json", metadata)

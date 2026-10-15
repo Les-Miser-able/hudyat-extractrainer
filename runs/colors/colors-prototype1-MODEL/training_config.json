@@ -1,0 +1,42 @@
+{
+  "command": "train",
+  "dataset": "C:\\Users\\Russel\\Desktop\\trainer\\datasets_augmented\\colors\\colors-prototype1",
+  "output": "C:\\Users\\Russel\\Desktop\\trainer\\runs\\colors\\colors-prototype1-MODEL",
+  "epochs": 100,
+  "batch_size": 32,
+  "learning_rate": 0.001,
+  "patience": 12,
+  "seed": 42,
+  "class_weights": false,
+  "loader": "packed",
+  "resume_from": null,
+  "tensorflow_version": "2.21.0",
+  "split_counts": {
+    "test": {
+      "blue": 7,
+      "green": 7,
+      "orange": 7,
+      "red": 7,
+      "violet": 7,
+      "yellow": 7
+    },
+    "train": {
+      "blue": 279,
+      "green": 279,
+      "orange": 279,
+      "red": 279,
+      "violet": 279,
+      "yellow": 279
+    },
+    "validation": {
+      "blue": 7,
+      "green": 7,
+      "orange": 7,
+      "red": 7,
+      "violet": 7,
+      "yellow": 7
+    }
+  },
+  "actual_optimizer_learning_rate": 0.0010000000474974513,
+  "data_loader": "packed"
+}

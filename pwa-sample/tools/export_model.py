@@ -10,6 +10,8 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from fsl_trainer.training.trainer import build_model, tensorflow
+from fsl_trainer.data.preprocessing import model_normalization, preprocess_sequence
+from fsl_trainer.data.sequences import resample
 
 
 def normalized(config):
@@ -20,17 +22,18 @@ def normalized(config):
     return config
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--category", required=True)
     parser.add_argument("--run", required=True, type=Path)
     parser.add_argument("--hand-model", type=Path, default=ROOT/"models"/"hand_landmarker.task")
     parser.add_argument("--site", type=Path, default=ROOT/"pwa-sample"/"dist")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if not args.category or any(c not in "abcdefghijklmnopqrstuvwxyz0123456789_-" for c in args.category):
         parser.error("Use a lowercase category ID containing letters, digits, hyphens or underscores.")
     classes = json.loads((args.run/"classes.json").read_text(encoding="utf-8"))
     preprocessing = json.loads((args.run/"preprocessing.json").read_text(encoding="utf-8"))
+    normalization = model_normalization(preprocessing)
     extraction = preprocessing.get("extraction")
     if not extraction:
         parser.error("Browser camera inference needs raw-media extraction metadata from training.")
@@ -71,6 +74,13 @@ def main():
     probes[2,:,63:126] = rng.uniform(0.1,0.8,(32,63)); probes[2,:,127]=1
     probabilities = model(probes,training=False).numpy()
     (dest/"parity.json").write_text(json.dumps({"inputs":probes.tolist(),"expected":probabilities.tolist()}),encoding="utf-8")
+    camera_cases = []
+    for sample, (width, height) in zip(probes, [(640, 480), (1280, 720), (480, 640)]):
+        expected_input = resample(preprocess_sequence(sample, width, height, normalization))
+        camera_cases.append({"frames": sample.tolist(), "width": width, "height": height,
+                             "expected": expected_input.tolist()})
+    (dest/"camera-preprocessing-parity.json").write_text(json.dumps(
+        {"preprocessing": {"normalization": normalization}, "cases": camera_cases}), encoding="utf-8")
     catalog_path = args.site/"catalog.json"
     catalog = json.loads(catalog_path.read_text(encoding="utf-8")) if catalog_path.exists() else {"categories":[]}
     entries = {entry["id"]:entry for entry in catalog["categories"]}

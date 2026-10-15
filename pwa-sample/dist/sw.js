@@ -1,4 +1,4 @@
-const SHELL='fsl-pocket-shell-v4';
+const SHELL='fsl-pocket-shell-v5';
 const MODELS='fsl-pocket-models-v1';
 const SHARED='fsl-pocket-shared-v1';
 self.addEventListener('install',event=>event.waitUntil((async()=>{
