@@ -1,6 +1,6 @@
 import {HAND_EDGES,describeFrame,webcamReport} from './diagnostics.js';
 import {HandLandmarker,FilesetResolver} from './vendor/vision_bundle.mjs';
-import {buildModel,loadWeights,packResult,resample,sha256,rank} from './core.js';
+import {buildModel,loadWeights,packResult,preprocessFrames,normalizationFor,sha256,rank} from './core.js';
 const $=id=>document.getElementById(id);
 const tf=globalThis.tf;
 const MODEL_CACHE='fsl-pocket-models-v1';
@@ -64,6 +64,7 @@ async function loadLocal(){
     throw new Error('The saved model failed its integrity check. Remove it and download again.');
   metadata=JSON.parse(new TextDecoder().decode(metaBuffer));
   if(metadata.category!==selected.id)throw new Error('The model category does not match.');
+  normalizationFor(metadata.preprocessing);
   await tf.ready();
   $('expected').replaceChildren(...metadata.classes.map(label=>{const o=document.createElement('option');o.value=label;o.textContent=label;return o;}));
   const candidate=buildModel(tf,metadata.classes.length);
@@ -173,7 +174,11 @@ async function infer(frames){
     $('result-note').textContent='Move your hand into view and try again.';return;
   }
   message('Recognizing on this device…');
-  const tensor=tf.tensor3d(resample(frames),[1,32,128]);
+  const input=preprocessFrames(frames,$('video').videoWidth,$('video').videoHeight,metadata.preprocessing);
+  if(!Array.from({length:32},(_,t)=>input[t*128+126]||input[t*128+127]).some(Boolean)){
+    clearResult();$('prediction').textContent='No usable hand landmarks detected.';return;
+  }
+  const tensor=tf.tensor3d(input,[1,32,128]);
   let prediction;
   try{
     prediction=model.predict(tensor);

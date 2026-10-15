@@ -81,6 +81,7 @@ test('preparation submits video controls with the existing form fields', async (
       yield ['video_extra_samples', '3'];
       yield ['video_time_warp', '0.05'];
       yield ['seed', '42'];
+      yield ['normalization', 'hand-relative-sequence-v1'];
     }
   };
   app.context.fetch = async (url, options) => {
@@ -96,6 +97,7 @@ test('preparation submits video controls with the existing form fields', async (
   assert.equal(requests[0].video_extra_samples, '3');
   assert.equal(requests[0].video_time_warp, '0.05');
   assert.equal(requests[0].seed, '42');
+  assert.equal(requests[0].normalization, 'hand-relative-sequence-v1');
 });
 
 test('editing the dataset name updates the preparation output preview', () => {

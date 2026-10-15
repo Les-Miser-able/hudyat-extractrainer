@@ -2,8 +2,35 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile,stat} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
-import {resample,packResult,rank} from '../dist/core.js';
+import {resample,packResult,rank,preprocessFrames,normalizeFrames,normalizationFor} from '../dist/core.js';
 const dist=new URL('../dist/',import.meta.url);
+test('old model metadata keeps image features and unknown normalization is rejected',()=>{
+ const f=new Float32Array(128);f[0]=.3;f[126]=1;
+ assert.deepEqual(preprocessFrames([f],0,0,{}),resample([f]));
+ assert.equal(normalizationFor({}),'image');
+ assert.throws(()=>normalizationFor({normalization:'unknown'}));
+ assert.throws(()=>normalizationFor({normalization:null}));
+});
+test('hand-relative camera features preserve shape across distance and encode movement separately',()=>{
+ const frame=shift=>{
+  const f=new Float32Array(128);
+  for(let j=0;j<21;j++){f[j*3]=.4+j*.005+shift;f[j*3+1]=.8-j*.02;f[j*3+2]=-j*.001;}
+  f[126]=1;return f;
+ };
+ const a=frame(0),b=frame(.15);
+ const normalized=normalizeFrames([a,b],640,480);
+ assert.equal(normalized[0][0],0);
+ assert.ok(normalized[1][0]>.9);
+ for(let i=3;i<63;i++)assert.ok(Math.abs(normalized[0][i]-normalized[1][i])<1e-6);
+ const small=new Float32Array(a);
+ for(let j=0;j<21;j++)for(let c=0;c<3;c++)small[j*3+c]=a[c]+.5*(a[j*3+c]-a[c]);
+ const expected=normalizeFrames([a],640,480)[0],actual=normalizeFrames([small],640,480)[0];
+ for(let i=0;i<128;i++)assert.ok(Math.abs(expected[i]-actual[i])<1e-6);
+ assert.deepEqual(Array.from(actual.slice(63,126)),Array(63).fill(0));
+ const degenerate=new Float32Array(128);degenerate.fill(.3,0,63);degenerate[126]=1;
+ assert.ok(normalizeFrames([degenerate],640,480)[0].every(v=>v===0));
+ assert.throws(()=>normalizeFrames([a],0,480));
+});
 test('held pose repeats coordinates and binary presence without jitter',()=>{
  const frame=new Float32Array(128);frame[0]=.25;frame[126]=1;
  const out=resample([frame]);assert.equal(out.length,4096);

@@ -23,6 +23,19 @@ Three words used in this guide:
 Each category gets a separate model. You select the category when predicting;
 the trainer does not automatically decide whether a sign is a letter, color, or number.
 
+New alphabet preparation from images/videos automatically uses hand-relative
+landmarks. This reduces sensitivity to hand size and position while preserving
+movement for J/Z. Other categories keep their existing defaults. In the dashboard,
+leave **Landmark preprocessing → Category default** selected and Jitter empty;
+use a new dataset name and a new training run. Existing models continue using
+their saved preprocessing and need retraining to gain the new behavior.
+
+Static training images gain rotation, mirror, and noise variants. Validation and
+test use clean originals, so their counts will be smaller than in older alphabet
+datasets. Hand-relative preparation needs raw images/videos rather than supplied
+`.npy` arrays. To reproduce older alphabet preparation, select **Original image
+coordinates** or pass `--normalization image` to category preparation.
+
 ## 1. Open the project
 
 Open the `fsl_trainer` folder in File Explorer. Click the address bar, type

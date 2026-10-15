@@ -13,14 +13,17 @@ import numpy as np
 
 from ..data.extraction import Extractor, DEFAULT_MODEL, pack_result
 from ..data.sequences import resample
+from ..data.preprocessing import IMAGE, model_normalization, preprocess_sequence
 from ..training.trainer import tensorflow
 from .gesture_capture import GestureCapture
 from .timing import capture_timing
 
 
 class LivePredictor:
-    def __init__(self, model, classes, extractor, mode):
+    def __init__(self, model, classes, extractor, mode, normalization=IMAGE):
         self.model, self.classes, self.extractor, self.mode = model, classes, extractor, mode
+        self.normalization = normalization
+        self.frame_size = None
         self.detector = extractor.detector(video=True) if mode in ("motion", "gesture") else None
         self.capture = GestureCapture() if mode in ('gesture', 'motion') else None
         self.has_result = False
@@ -45,6 +48,12 @@ class LivePredictor:
                 self.capture.reset()
         self.previous = timestamp
         image = self.extractor.image(rgb)
+        if self.normalization != IMAGE:
+            size = (rgb.shape[1], rgb.shape[0])
+            if self.frame_size is not None and size != self.frame_size and self.capture:
+                self.capture.reset()
+                self.has_result = False
+            self.frame_size = size
         result = (self.detector.detect_for_video(image, timestamp) if self.detector
                   else self.extractor.image_detector.detect(image))
         features = pack_result(result, self.extractor.swap_hands)
@@ -61,11 +70,19 @@ class LivePredictor:
             frames = captured['frames']
             times = np.array([item[0] for item in frames])
             positions = np.interp(np.linspace(times[0], times[-1], 32), times, np.arange(len(times)))
-            sequence = resample(np.stack([item[1] for item in frames]), positions)
+            raw_sequence = np.stack([item[1] for item in frames])
+            if self.normalization != IMAGE:
+                raw_sequence = preprocess_sequence(raw_sequence, *self.frame_size, self.normalization)
+            sequence = resample(raw_sequence, positions)
         elif not features[126:].any():
             return {"status": "no_hand", "probabilities": {}, "message": "No hand detected."}
         else:
-            sequence = resample(features[None])
+            raw_sequence = features[None]
+            if self.normalization != IMAGE:
+                raw_sequence = preprocess_sequence(raw_sequence, *self.frame_size, self.normalization)
+            sequence = resample(raw_sequence)
+        if not sequence[:, 126:].any():
+            return {"status": "no_hand", "probabilities": {}, "message": "No usable hand landmarks detected."}
         probabilities = np.asarray(self.model(sequence[None], training=False))[0]
         if (probabilities.shape != (len(self.classes),) or not np.isfinite(probabilities).all()
                 or (probabilities < 0).any() or (probabilities > 1).any()):
@@ -114,6 +131,7 @@ def load_predictor(run, hand_model, mode):
     settings = metadata.get("extraction")
     if not settings:
         raise ValueError("This run has no camera extraction settings. Use normalized .npy sample prediction.")
+    normalization = model_normalization(metadata)
     extractor = Extractor(model=hand_model or DEFAULT_MODEL, confidence=settings["detection_confidence"],
                           swap_hands=settings["swap_hands"])
     try:
@@ -123,7 +141,7 @@ def load_predictor(run, hand_model, mode):
         model = tensorflow().keras.models.load_model(run / "best.keras", compile=False)
         if tuple(model.input_shape[1:]) != (32, 128) or model.output_shape[-1] != len(classes):
             raise ValueError("Model shape does not match its landmark layout or class labels.")
-        return LivePredictor(model, classes, extractor, mode)
+        return LivePredictor(model, classes, extractor, mode, normalization)
     except Exception:
         extractor.close()
         raise

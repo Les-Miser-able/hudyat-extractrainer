@@ -13,6 +13,9 @@ from ..data.sequences import resample
 from ..data.augmentation import augment_sequence, configuration, build_report
 from ..data.augmentation_options import add_arguments
 from ..data.source_selection import add_arguments as add_source_arguments, folder_selection, source_files
+from ..data.preprocessing import (IMAGE, HAND_RELATIVE, COORDINATES, augment_pose,
+                                  preparation_normalization, model_normalization,
+                                  add_arguments as add_preprocessing_arguments)
 
 FRAMES, FEATURES = 32, 128
 LAYOUT = ["left_xyz_landmarks_0_to_20", "right_xyz_landmarks_0_to_20",
@@ -36,9 +39,12 @@ def save_augmentation_summary(root, manifest):
             "static_sources": static,
             "sequence_sources": len(sources) - static,
             "augmented_static_sequences": sum(bool(row["synthetic"]) and row["static"] for row in rows),
-            "resampled_sequences": sum(not row["synthetic"] for row in rows),
+            "resampled_sequences": sum(not row["synthetic"] and not row["static"] for row in rows),
             "total_output_sequences": len(rows),
         }
+        clean_static = sum(not row["synthetic"] and row["static"] for row in rows)
+        if clean_static:
+            result["unaugmented_static_sequences"] = clean_static
         if video_report is not None:
             details = [item for item in video_report["sources"] if item["source"] in sources]
             result["augmented_sequence_samples"] = sum(
@@ -61,6 +67,8 @@ def save_augmentation_summary(root, manifest):
     print(f"Original sources accepted: {summary['original_sources']:,} "
           f"({summary['static_sources']:,} static, {summary['sequence_sources']:,} video/sequence)")
     print(f"Augmented static sequences: {summary['augmented_static_sequences']:,}")
+    if "unaugmented_static_sequences" in summary:
+        print(f"Unaugmented static sequences: {summary['unaugmented_static_sequences']:,}")
     print(f"Resampled video/sequence outputs: {summary['resampled_sequences']:,}")
     if video_report is not None:
         print(f"Video/sequence extras generated: {summary['augmented_sequence_samples']:,} "
@@ -171,6 +179,9 @@ def split_sources(records, val_fraction, test_fraction, seed):
 
 
 def prepare(args):
+    args.normalization = preparation_normalization(getattr(args, "normalization", IMAGE))
+    if getattr(args, "jitter", None) is None:
+        args.jitter = .03 if args.normalization == HAND_RELATIVE else .0075
     video_settings = configuration(getattr(args, "video_extra_samples", 0),
                                    getattr(args, "video_time_warp", .05), args.seed)
     source, dest = Path(args.source).resolve(), Path(args.output).resolve()
@@ -189,6 +200,8 @@ def prepare(args):
                        for p in source_files(folder, selected, videos_only)]
         if any(p.suffix.lower() in IMAGE_EXTENSIONS | VIDEO_EXTENSIONS for p in media_files):
             return prepare_media(args, prepare)
+        if args.normalization == HAND_RELATIVE:
+            raise ValueError("Hand-relative preparation requires raw images/videos, not supplied .npy files")
     mapping = None
     if args.groups:
         with open(args.groups, newline="", encoding="utf-8-sig") as handle:
@@ -239,10 +252,13 @@ def prepare(args):
         split = assignment[record["group"]]
         x = load_sequence(source / record["source"])
         # Assign the source first; all synthetic siblings inherit the same split.
-        count = args.static_variants if record["static"] else 1
+        relative_features = args.normalization == HAND_RELATIVE
+        count = args.static_variants if record["static"] and (not relative_features or split == "train") else 1
         for variant in range(count):
-            if record["static"]:
-                sequence = synthetic_sequence(x, rng, args.jitter)
+            synthetic = record["static"] and (not relative_features or (split == "train" and variant > 0))
+            if synthetic:
+                frame = augment_pose(x, rng) if relative_features else x
+                sequence = synthetic_sequence(frame, rng, args.jitter)
             else:
                 sequence = resample(x)
             token = hashlib.sha256(record["source"].encode()).hexdigest()[:16]
@@ -250,7 +266,7 @@ def prepare(args):
             (dest / relative).parent.mkdir(parents=True, exist_ok=True)
             np.save(dest / relative, sequence.astype(np.float32), allow_pickle=False)
             manifest.append({**record, "split": split, "path": relative.as_posix(),
-                             "variant": variant, "variant_of": record["source"], "synthetic": record["static"]})
+                             "variant": variant, "variant_of": record["source"], "synthetic": synthetic})
         if video_settings and not record["static"] and split == "train":
             extras, detail = augment_sequence(x, record["source"], args.seed,
                                       video_settings["extra_samples"],
@@ -273,6 +289,13 @@ def prepare(args):
         "static_variants": args.static_variants, "jitter_std": args.jitter,
         "static_method": "repeat + independent per-timestep Gaussian coordinate noise",
         "grouping": "provided CSV" if mapping is not None else "original source file"})
+    if args.normalization == HAND_RELATIVE:
+        metadata = json.loads((dest / "preprocessing.json").read_text(encoding="utf-8"))
+        metadata.update(normalization=HAND_RELATIVE, coordinates=COORDINATES,
+                        static_method="one clean original; training-only repeat + Gaussian noise in palm lengths",
+                        pose_augmentation={"split": "train", "rotation_degrees": 15., "mirror_probability": .5},
+                        evaluation="one unaugmented sequence per accepted source")
+        save_json(dest / "preprocessing.json", metadata)
     if filtered:
         metadata = json.loads((dest / "preprocessing.json").read_text(encoding="utf-8"))
         metadata["source_selection"] = {"folders": selected, "videos_only": videos_only,
@@ -525,9 +548,11 @@ def predict(args):
         settings = metadata.get("extraction")
         if not settings:
             raise ValueError("This model has no raw-media extraction settings; supply normalized .npy input")
+        normalization = model_normalization(metadata)
+        feature_options = {"normalization": normalization} if normalization != IMAGE else {}
         with Extractor(model=getattr(args, "hand_model", None) or DEFAULT_MODEL,
                        confidence=settings["detection_confidence"],
-                       swap_hands=settings["swap_hands"]) as extractor:
+                       swap_hands=settings["swap_hands"], **feature_options) as extractor:
             if hashlib.sha256(extractor.model.read_bytes()).hexdigest() != settings["model_sha256"]:
                 raise ValueError("Hand-landmark model differs from training; use --hand-model with the original asset")
             sequence, _ = extractor.extract(args.sample)
@@ -557,6 +582,7 @@ def main():
     prep = sub.add_parser("prepare", help="Split original sources, resample videos, synthesize grouped image variants")
     add_arguments(prep)
     add_source_arguments(prep)
+    add_preprocessing_arguments(prep)
     prep.add_argument("--source", required=True)
     prep.add_argument("--output", required=True)
     prep.add_argument("--groups", help="Optional CSV: path,group; use signer/session IDs")
@@ -564,7 +590,8 @@ def main():
     prep.add_argument("--test", type=float, default=0.15)
     prep.add_argument("--seed", type=int, default=42)
     prep.add_argument("--static-variants", type=positive_int, default=8)
-    prep.add_argument("--jitter", type=nonnegative, default=0.0075)
+    prep.add_argument("--jitter", type=nonnegative, default=None,
+                      help="Default: 0.0075 image units, or 0.03 palm lengths for hand-relative preprocessing")
     prep.add_argument("--hand-model", help="Custom MediaPipe .task file; default model downloads automatically")
     prep.add_argument("--detection-confidence", type=nonnegative, default=0.5)
     prep.add_argument("--swap-hands", action="store_true", help="Swap reported Left/Right slots consistently")

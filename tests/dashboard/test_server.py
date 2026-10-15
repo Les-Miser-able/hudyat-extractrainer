@@ -15,6 +15,28 @@ import dashboard
 
 
 class DashboardTests(unittest.TestCase):
+    def test_preprocessing_defaults_are_isolated_to_alphabet_and_overridable(self):
+        from fsl_trainer.data.preprocessing import HAND_RELATIVE
+        for category in ['alphabet', 'colors', 'numbers', 'greetings', 'family', 'shapes']:
+            for label in ['A', 'B']:
+                folder = self.root / 'data' / category / label
+                folder.mkdir(parents=True, exist_ok=True)
+                for index in range(3):
+                    (folder / f'{index}.jpg').touch()
+            request = {'action': 'prepare', 'category': category, 'dataset_name': 'fresh', 'jitter': ''}
+            command = dashboard.build_command(request)
+            if category == 'alphabet':
+                self.assertEqual(command[command.index('--normalization') + 1], HAND_RELATIVE)
+                self.assertEqual(command[command.index('--jitter') + 1], '0.03')
+            else:
+                self.assertNotIn('--normalization', command)
+                self.assertEqual(command[command.index('--jitter') + 1], '0.0075')
+            command = dashboard.build_command({**request, 'normalization': 'image'})
+            self.assertNotIn('--normalization', command)
+            self.assertEqual(command[command.index('--jitter') + 1], '0.0075')
+        with self.assertRaisesRegex(ValueError, 'normalization'):
+            dashboard.build_command({**request, 'normalization': 'unknown'})
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name).resolve()

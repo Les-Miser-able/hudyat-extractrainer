@@ -12,6 +12,55 @@ Augmentation development folders and output conventions are documented in
 
 A TensorFlow trainer with automatic hand-landmark extraction from raw images and videos. Existing normalized .npy landmarks are also accepted. Static poses and dynamic gestures use the same (32, 128) input, classifier and saved Keras model. No per-letter special cases.
 
+## Alphabet landmark preprocessing
+
+New raw-media alphabet datasets prepared through the dashboard or `categories.py`
+use `hand-relative-sequence-v1`. Other categories and supplied-landmark-only
+datasets retain their original preprocessing defaults. Existing datasets and
+checkpoints are not converted. Select **Original image coordinates**, or pass
+`--normalization image`, to reproduce the previous alphabet preparation.
+
+The new convention converts x/y/z to pixel units using the frame dimensions,
+centers each detected hand on its wrist, and divides by pixel palm length
+(wrist to middle-finger knuckle). Landmarks 1–20 carry this per-frame hand shape.
+Landmark 0 carries wrist displacement from its first valid position, divided by
+the sequence's median pixel palm length. This retains trajectories needed for
+J/Z while reducing sensitivity to image placement, hand size, and aspect ratio.
+It cannot remove changes in perspective, occlusion, or incorrect detections.
+
+For static images, the training split keeps one clean original and generates
+the remaining requested variants with ±15° rotation, 50% mirroring (including
+hand-slot swaps), and jitter of **0.03 palm lengths** by default. Validation and
+test keep **one clean sequence per accepted source**, with no augmentation.
+Videos retain their full normalized motion and the existing optional training-only
+timing augmentation. Group splitting, input shape, network, and optimizer are unchanged.
+
+Prepare and train a fresh version to use these features:
+
+```powershell
+.\.venv\Scripts\python.exe categories.py prepare --category alphabet --dataset-name hand_relative_v1
+.\.venv\Scripts\python.exe categories.py train --category alphabet --dataset-name hand_relative_v1 --run hand_relative_v1 --class-weights
+```
+
+For the lower-level `trainer.py prepare` command, explicitly pass
+`--normalization hand-relative-sequence-v1`; its default remains the legacy path.
+Leave Jitter empty in the dashboard for the profile's default. Explicit jitter
+values use the selected profile's coordinate units. Hand-relative preparation
+requires original images/videos: supplied `.npy` arrays lack image dimensions
+and cannot be mixed into it. Legacy `.npy` workflows continue to work unchanged.
+
+Saved preprocessing metadata automatically selects the correct features for
+raw-file prediction, desktop webcam inference, and PWA inference. Normalized
+`.npy` prediction inputs must already follow the run's feature convention.
+Resume rejects checkpoints with different preprocessing; train a fresh model
+instead of applying hand normalization to old weights. PWA exports include
+camera-preprocessing parity fixtures as well as model-output parity fixtures.
+
+For live checks, use **Held pose** for static letters and a movement mode for
+J/Z. The new representation also supports movement capture, but entry/ending
+motion should be evaluated on independent webcam recordings. A high prepared
+test score still does not establish live accuracy.
+
 ## Local training dashboard
 
 On Windows, install the optional desktop window dependency into the Python
@@ -251,7 +300,7 @@ Other training artifacts are stored alongside each model. Prediction uses the ch
 
 Existing outputs are protected. Use a new --run name for retraining (omitting it generates a timestamp). To prepare another dataset version, use a new `--dataset-name` on category prepare and select that name on category train. Preparation defaults to `prepared_v1` beneath `datasets_augmented/<category>/`. Training can infer the dataset only when exactly one exists; otherwise specify `--dataset-name`. Use `--dataset-name .` to train an original category-level dataset. The `--datasets` option still changes the dataset root, while `--data` and `--runs` change source and model roots.
 
-Category preparation supports --static-variants 8, --jitter 0.0075, --validation 0.15, --test 0.15 and --seed 42. For signer/session groups, pass --groups-dir groups with groups/alphabet.csv, groups/numbers.csv, etc. CSV paths are relative to each category, for example A/image001.npy. Each model's split is independent; cross-category signer separation is not imposed.
+Category preparation supports --static-variants 8, --validation 0.15, --test 0.15 and --seed 42. Automatic jitter is 0.03 for hand-relative features and 0.0075 for the original feature convention. For signer/session groups, pass --groups-dir groups with groups/alphabet.csv, groups/numbers.csv, etc. CSV paths are relative to each category, for example A/image001.npy. Each model's split is independent; cross-category signer separation is not imposed.
 
 Training supports --epochs 100, --batch-size 32, --learning-rate 0.001, --patience 12, --seed 42 and --class-weights. Run each command with --help for options.
 
@@ -277,7 +326,7 @@ Coordinates use MediaPipe's image-normalized landmarks: X relative to image widt
 
 Detection and presence confidence default to 0.5; change with --detection-confidence (0 to 1). Missing hands have zero coordinates and binary zero flags. Images with no detected hand, and videos with no hand in any frame, are rejected and reported. Partly detected videos retain all decoded frames and expose detected_frames in the report.
 
-After extraction, static images still generate 8 Gaussian-jitter variants by default, videos still interpolate to 32 frames, and every sample remains (32,128). All synthetic siblings share the original raw path as variant_of. Roboflow filenames sharing a stem before .rf. are grouped; common names such as name_jpg.rf.HASH.jpg are also grouped with name.jpg. This is a filename heuristic: use --groups-dir CSVs for other known source/signer relationships. CSV paths now refer to original raw filenames, not temporary arrays.
+With original image coordinates, static images generate 8 Gaussian-jitter variants by default in every split. With hand-relative features, training keeps an original plus variants while validation/test keep clean originals, as described above. Videos interpolate to 32 frames and every sample remains (32,128). All synthetic siblings share the original raw path as variant_of. Roboflow filenames sharing a stem before .rf. are grouped; common names such as name_jpg.rf.HASH.jpg are also grouped with name.jpg. This is a filename heuristic: use --groups-dir CSVs for other known source/signer relationships. CSV paths now refer to original raw filenames, not temporary arrays.
 
 Identical extracted arrays within the same class are deduplicated and reported as rejected duplicates. Identical arrays with conflicting class labels fail preparation. After rejections, all classes still need at least three independent groups. If this fails, a timestamped extraction-failed report is saved beside the requested output directory.
 
@@ -329,7 +378,9 @@ When detection changes between present and absent, coordinate interpolation span
 
 ## Static-image repeat + jitter
 
-Each original static image generates **8 variants** by default, in whichever split its source belongs to. Each variant repeats the 128-value source vector for 32 timesteps and adds independent Gaussian noise to every present-hand coordinate at each timestep:
+Under the original image-coordinate convention, each static image generates **8 variants** by default, in whichever split its source belongs to. Each variant repeats the 128-value source vector for 32 timesteps and adds independent Gaussian noise to every present-hand coordinate at each timestep. The new alphabet convention uses the training-only rules described in **Alphabet landmark preprocessing** above.
+
+Original image-coordinate jitter settings:
 
 - Mean: 0.
 - Default standard deviation: **0.0075**, or 0.75% of a unit normalized coordinate scale.

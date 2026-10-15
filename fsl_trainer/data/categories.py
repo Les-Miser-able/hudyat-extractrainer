@@ -9,6 +9,8 @@ from .augmentation_options import add_arguments, extra_samples, time_warp
 from .source_selection import add_arguments as add_source_arguments, folder_selection, source_files
 from ..paths import PROJECT_ROOT
 from .dataset_paths import dataset_name, select_dataset
+from .preprocessing import IMAGE, HAND_RELATIVE, preparation_normalization, add_arguments as add_preprocessing_arguments
+from .source_selection import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 
 BASE = PROJECT_ROOT
 
@@ -75,10 +77,19 @@ def build_jobs(args):
                              "Choose another --dataset-name or --run name.")
         command = [sys.executable, "-B", str(BASE / "trainer.py")]
         if preparing:
+            has_media = any(p.suffix.lower() in IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
+                            for folder in source.iterdir() if folder.is_dir()
+                            for p in source_files(folder, selected_folders, videos_only))
+            normalization = preparation_normalization(getattr(args, "normalization", "auto"), name, has_media)
+            jitter = getattr(args, "jitter", None)
+            if jitter is None:
+                jitter = .03 if normalization == HAND_RELATIVE else .0075
             command += ["prepare", "--source", str(source), "--output", str(target),
                         "--validation", str(args.validation), "--test", str(args.test),
                         "--seed", str(args.seed), "--static-variants", str(args.static_variants),
-                        "--jitter", str(args.jitter)]
+                        "--jitter", str(jitter)]
+            if normalization != IMAGE:
+                command += ["--normalization", normalization]
             for folder in selected_folders or []:
                 command += ["--source-folder", folder]
             if videos_only:
@@ -153,12 +164,14 @@ def main():
         if action == "prepare":
             add_arguments(cmd)
             add_source_arguments(cmd)
+            add_preprocessing_arguments(cmd, default="auto")
             cmd.add_argument("--data", default=str(BASE / "data"))
             cmd.add_argument("--groups-dir", help="Directory with one <category>.csv per selected category")
             cmd.add_argument("--validation", type=float, default=0.15)
             cmd.add_argument("--test", type=float, default=0.15)
             cmd.add_argument("--static-variants", type=int, default=8)
-            cmd.add_argument("--jitter", type=float, default=0.0075)
+            cmd.add_argument("--jitter", type=float, default=None,
+                             help="Default: 0.0075 image units, or 0.03 palm lengths for raw alphabet media")
             cmd.add_argument("--hand-model", help="Custom MediaPipe .task file")
             cmd.add_argument("--detection-confidence", type=float, default=0.5)
             cmd.add_argument("--swap-hands", action="store_true")

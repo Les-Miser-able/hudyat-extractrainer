@@ -20,6 +20,8 @@ from ..paths import PROJECT_ROOT
 from ..data.augmentation_options import extra_samples, time_warp
 from ..data.source_selection import SUPPORTED, VIDEO_EXTENSIONS, source_files, folder_selection
 from ..data.dataset_paths import dataset_name, prepared_datasets, select_dataset
+from ..data.preprocessing import IMAGE, HAND_RELATIVE, preparation_normalization
+from ..data.source_selection import IMAGE_EXTENSIONS
 from .live import LiveInference
 from .timing import capture_timing
 from .model_records import run_metadata, read_records, save_record
@@ -183,11 +185,18 @@ def build_command(data):
         issue = preparation_issue(source, classes)
         if issue:
             raise ValueError(issue)
+        has_media = any(p.suffix.lower() in IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
+                        for folder in source.iterdir() if folder.is_dir()
+                        for p in source_files(folder, selected, videos_only))
+        normalization = preparation_normalization(data.get("normalization", "auto"), category, has_media)
+        jitter_data = data if data.get("jitter") not in (None, "") else {k: v for k, v in data.items() if k != "jitter"}
         command += ["prepare", "--source", str(source), "--output", str(dataset),
                     "--validation", str(validation), "--test", str(test),
                     "--static-variants", str(number(data, "variants", 8, 1, 1000, True)),
-                    "--jitter", str(number(data, "jitter", .0075, 0, 1)),
+                    "--jitter", str(number(jitter_data, "jitter", .03 if normalization == HAND_RELATIVE else .0075, 0, 1)),
                     "--detection-confidence", str(number(data, "confidence", .5, 0, 1))]
+        if normalization != IMAGE:
+            command += ["--normalization", normalization]
         if video_count:
             command += ["--video-extra-samples", str(video_count),
                         "--video-time-warp", str(video_strength)]

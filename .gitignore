@@ -4,6 +4,7 @@ __pycache__/
 /models/*
 !/models/hand_landmarker.task
 
+
 # Keep trained checkpoints and their supporting metadata/results.
 /runs/**
 !/runs/*/
@@ -43,6 +44,7 @@ htmlcov/
 /datasets/
 /datasets_*/
 !/datasets_augmented/
+/outputs/
 
 # Browser source, exported models, detector, and catalog are tracked.
 # Vendor libraries and the shell asset list are recreated by npm run setup.
