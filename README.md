@@ -61,6 +61,74 @@ J/Z. The new representation also supports movement capture, but entry/ending
 motion should be evaluated on independent webcam recordings. A high prepared
 test score still does not establish live accuracy.
 
+## Automated benchmark metrics
+
+**Model runs → Benchmark metrics** shows accuracy, macro precision, macro recall,
+macro F1, lowest sign recall (including tied sign names), response time, and an
+automatic **Met / Not met / Incomplete** result. The category and Preferred filters
+also apply to **Download metrics CSV**.
+
+Accuracy, macro precision, macro recall, and macro F1 each require at least 85%;
+lowest sign recall requires at least 70%; response time must be strictly below
+1,000 ms. Every saved class participates in macro averages with equal weight.
+Zero denominators produce zero precision/recall/F1. Every class needs held-out test
+support. Required class counts: Alphabet 26, Numbers 10, Colors 6, Greetings 10.
+A model with fewer or more classes cannot pass that category benchmark; categories
+without a specified required count remain incomplete. Checks use unrounded values.
+Any failed check gives Not met; otherwise missing evidence gives Incomplete.
+All checks must pass for Met.
+
+New training runs automatically save the extra metrics in `test_metrics.json`
+and write `benchmark.json` and `benchmark.csv` beside the checkpoint. These files
+are included in model ZIPs and HUDYAT export ZIPs. Model-record JSON downloads
+also include the derived benchmark summary and timing metadata. Legacy runs
+derive missing aggregates from saved per-class scores when available; browsing
+does not rewrite original scores. Choose **Measure local inference** to time an
+existing checkpoint without retraining. The saved dataset/test files must still be available.
+The same operation is available from the repository root:
+
+```powershell
+.\.venv\Scripts\python.exe -B trainer.py benchmark --run "runs/alphabet/my-model"
+```
+
+The response-time requirement uses **full HUDYAT camera-to-confirmed-result time**.
+Choose **HUDYAT camera test** beside a model and supply the HUDYAT checkout path
+(default `../HUDYAT`, read only). Preparation exports the selected model into
+`exports/hudyat-timing/<session>/` and builds a standalone browser page from the
+actual HUDYAT recognition, preprocessing, and confirmation sources using HUDYAT's
+installed Vite/React/TensorFlow.js/MediaPipe dependencies. It replaces only model
+asset transport and adds timing hooks. HUDYAT files and database are untouched.
+
+Open the test from Activity, start the camera in the target browser, select the
+expected sign, and begin a trial. Timing starts before extraction on the first
+submitted camera frame with a detected hand and stops after the first confirmed
+result is rendered and allowed to paint. Hand extraction, preprocessing, recording,
+inference, confidence/stability gates, and result rendering are included. Model
+downloads/loading and time before the first submitted hand frame are excluded.
+This measures the HUDYAT recognition flow in the trainer test page; deployed app
+network/UI integration should be evaluated separately if it changes this flow.
+
+Perform every model sign, then **Save timing results**. No camera images/videos
+are saved. `camera_timing.json` retains individual expected/confirmed signs, wrong
+confirmations, 15-second timeouts (including never detecting a hand), response times,
+per-session browser/camera/TF.js backend details, checkpoint hash, and hashes of the
+HUDYAT source files. Sessions
+are retained separately; the latest saved session supplies the table's median
+and p95. All signs need measured responses and any timeout fails completion.
+Missing camera measurements cannot pass; local inference never substitutes for
+them. Model/ZIP downloads include these camera reports.
+
+The current HUDYAT code requires at least 1.2 seconds of stable alphabet estimates
+and records two-second clips for other categories. The existing full recognition
+flow therefore cannot meet a sub-second requirement from first hand frame. This
+trainer records that outcome without changing HUDYAT's rules.
+
+**Measure local inference** and the CLI command above provide an additional
+diagnostic: 30 single-sequence predictions after 3 warmups, using up to 30 evenly
+spaced held-out prepared samples. Output transfer and label selection are included;
+camera and confirmation are excluded. These diagnostic timings do not determine
+the response-time benchmark.
+
 ## Local training dashboard
 
 On Windows, install the optional desktop window dependency into the Python

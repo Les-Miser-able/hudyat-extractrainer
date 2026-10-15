@@ -696,3 +696,54 @@ test('model ZIP and HUDYAT download actions encode identifiers correctly', async
   app.node('download-export').handlers.click();
   assert.deepEqual(app.context.downloaded, ['/api/model/download?run=runs%2Falphabet%2Ftest%20model', '/api/model/export/download?id=export-1']);
 });
+
+
+test('benchmark table shows all metrics, timing scope, and missing evidence', () => {
+  const app = dashboard();
+  app.run(`state.runs = [{id:'runs/colors/v1', name:'v1', category:'colors', classes:6, checkpoint:true, complete:true,
+    benchmark:{signs:6, required_signs:6, accuracy:.9, macro_precision:.91, macro_recall:.92,
+      macro_f1:.93, lowest_sign_recall:.7, lowest_recall_signs:['<blue>'], status:'Incomplete',
+      response_time_ms:null, checks:{response_time_ms:null}}}]; renderRuns();`);
+  const html = app.node('benchmark-table').innerHTML;
+  for (const expected of ['90.00%', '91.00%', '92.00%', '93.00%', '70.00%', 'Not measured',
+    'Incomplete', 'response time ms: missing', '&lt;blue&gt;', 'data-benchmark-run="runs/colors/v1"']) {
+    assert.ok(html.includes(expected), expected);
+  }
+  assert.ok(!html.includes('<blue>'));
+  app.run(`state.runs[0].benchmark.response_time_ms = 24.5;
+    state.runs[0].benchmark.timing = {p95_ms:30, samples:30}; renderRuns();`);
+  assert.match(app.node('benchmark-table').innerHTML, /24.50 ms/);
+  assert.match(app.node('benchmark-table').innerHTML, /HUDYAT camera-to-result · median/);
+  app.node('run-filter').value = 'alphabet';
+  app.run('renderRuns()');
+  assert.match(app.node('benchmark-table').innerHTML, /No matching models/);
+});
+
+test('benchmark action submits the saved run without starting training', async () => {
+  const app = dashboard(), requests = [];
+  app.context.fetch = async (url, options) => {
+    if (options?.method === 'POST') requests.push(JSON.parse(options.body));
+    return {ok:false, json:async () => ({error:'Fixture rejection'})};
+  };
+  app.documentHandlers.click({target:{closest:selector => selector === '[data-benchmark-run]'
+    ? {dataset:{benchmarkRun:'runs/colors/v1'}} : null}});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(requests[0].action, 'benchmark');
+  assert.equal(requests[0].run, 'runs/colors/v1');
+});
+
+
+test('HUDYAT camera test prepares the selected run and Activity opens only completed pages', async () => {
+  const app=dashboard(), requests=[];
+  app.node('hudyat-project').value='../HUDYAT';
+  app.context.fetch=async(url,options)=>{if(options?.method==='POST')requests.push(JSON.parse(options.body));return {ok:false,json:async()=>({error:'Fixture rejection'})};};
+  app.documentHandlers.click({target:{closest:selector=>selector==='[data-hudyat-timing-run]'?{dataset:{hudyatTimingRun:'runs/colors/v1'}}:null}});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(requests[0].action,'hudyat-timing');
+  assert.equal(requests[0].hudyat_project,'../HUDYAT');
+  app.run(`jobs=[{id:'0011223344556677',action:'hudyat-timing',category:'colors',status:'running',started:'2026-10-15T12:00:00',exit_code:null,command:'test',logs:[]}];renderJob();`);
+  assert.equal(app.node('open-hudyat-timing').hidden,true);
+  app.run("jobs[0].status='completed';renderJob();");
+  assert.equal(app.node('open-hudyat-timing').hidden,false);
+  assert.equal(app.node('open-hudyat-timing').href,'/hudyat-timing/0011223344556677/');
+});

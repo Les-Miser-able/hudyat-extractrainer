@@ -1,0 +1,196 @@
+{
+  "version": 1,
+  "sessions": {
+    "16b482ef8156598e": {
+      "timing": {
+        "scope": "hudyat_camera_to_result",
+        "statistic": "median",
+        "median_ms": 2117.39999999851,
+        "p95_ms": 5140,
+        "max_ms": 5140,
+        "samples": 8,
+        "timeouts": 0,
+        "total_trials": 8,
+        "correct_trials": 7,
+        "tested_signs": [
+          "blue",
+          "green",
+          "orange",
+          "red",
+          "violet",
+          "yellow"
+        ],
+        "device": {
+          "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+          "platform": "Win32",
+          "camera": "USB2.0 HD UVC WebCam (322e:2012)",
+          "width": 640,
+          "height": 480,
+          "frame_rate": 30,
+          "backend": "webgl",
+          "tfjs_version": "4.22.0"
+        },
+        "session": "16b482ef8156598e",
+        "runtime_sources": {
+          "category-recognition.tsx": "17b88b82ebeb0189d5264ca84153ffac76b1ebd8d98aa65a240193cf5fa2255e",
+          "category-runtime.ts": "8bdc05321b77a5fb9f0795c01c25b1178c59d228447ea6925931186cc40357c8",
+          "category-core.js": "7c9b98c5f564005e4cd6cc21564094a24e9b64359ebc325dc678ef261a77d0f1",
+          "gesture-lock.ts": "d6e74d42d293373b3f5224bc41d36b976f67c6d5fa8dbcc906ef2c73bff01945",
+          "model-preprocessing.js": "6b140e48c5dad497f3c6b18619d437873d43a96eb921f1061c849591209728b5"
+        },
+        "checkpoint_sha256": "259f72bc6f95dbe67d0a62f09316a860879bed86609b4a113e1fc0329176d7cc",
+        "dependencies": {
+          "react": "19.2.8",
+          "react-dom": "19.2.8",
+          "@tensorflow/tfjs": "4.22.0",
+          "@mediapipe/tasks-vision": "0.10.32",
+          "vite": "8.2.2"
+        },
+        "measured_at": "2026-10-15T12:24:12+00:00",
+        "start": "Before hand extraction on the first submitted camera frame with a detected hand.",
+        "no_hand_timeout_start": "First submitted camera frame if no hand is ever detected.",
+        "end": "After rendering the first HUDYAT-confirmed result and allowing a browser paint.",
+        "includes": [
+          "hand extraction",
+          "landmark preprocessing",
+          "gesture recording",
+          "model inference",
+          "HUDYAT confidence and stability confirmation",
+          "result rendering"
+        ],
+        "excludes": [
+          "model download and loading",
+          "time before the first submitted hand frame"
+        ]
+      },
+      "trials": [
+        {
+          "target": "blue",
+          "predicted": "blue",
+          "correct": true,
+          "response_ms": 5140,
+          "elapsed_ms": 5140,
+          "timeout": false
+        },
+        {
+          "target": "blue",
+          "predicted": "blue",
+          "correct": true,
+          "response_ms": 2120.6999999955297,
+          "elapsed_ms": 2120.6999999955297,
+          "timeout": false
+        },
+        {
+          "target": "green",
+          "predicted": "green",
+          "correct": true,
+          "response_ms": 2102,
+          "elapsed_ms": 2102,
+          "timeout": false
+        },
+        {
+          "target": "orange",
+          "predicted": "orange",
+          "correct": true,
+          "response_ms": 2145.6999999955297,
+          "elapsed_ms": 2145.6999999955297,
+          "timeout": false
+        },
+        {
+          "target": "red",
+          "predicted": "red",
+          "correct": true,
+          "response_ms": 2114.10000000149,
+          "elapsed_ms": 2114.10000000149,
+          "timeout": false
+        },
+        {
+          "target": "violet",
+          "predicted": "violet",
+          "correct": true,
+          "response_ms": 2112.2000000029802,
+          "elapsed_ms": 2112.2000000029802,
+          "timeout": false
+        },
+        {
+          "target": "yellow",
+          "predicted": "violet",
+          "correct": false,
+          "response_ms": 2148.89999999851,
+          "elapsed_ms": 2148.89999999851,
+          "timeout": false
+        },
+        {
+          "target": "yellow",
+          "predicted": "yellow",
+          "correct": true,
+          "response_ms": 2108.60000000149,
+          "elapsed_ms": 2108.60000000149,
+          "timeout": false
+        }
+      ]
+    }
+  },
+  "latest": "16b482ef8156598e",
+  "timing": {
+    "scope": "hudyat_camera_to_result",
+    "statistic": "median",
+    "median_ms": 2117.39999999851,
+    "p95_ms": 5140,
+    "max_ms": 5140,
+    "samples": 8,
+    "timeouts": 0,
+    "total_trials": 8,
+    "correct_trials": 7,
+    "tested_signs": [
+      "blue",
+      "green",
+      "orange",
+      "red",
+      "violet",
+      "yellow"
+    ],
+    "device": {
+      "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+      "platform": "Win32",
+      "camera": "USB2.0 HD UVC WebCam (322e:2012)",
+      "width": 640,
+      "height": 480,
+      "frame_rate": 30,
+      "backend": "webgl",
+      "tfjs_version": "4.22.0"
+    },
+    "session": "16b482ef8156598e",
+    "runtime_sources": {
+      "category-recognition.tsx": "17b88b82ebeb0189d5264ca84153ffac76b1ebd8d98aa65a240193cf5fa2255e",
+      "category-runtime.ts": "8bdc05321b77a5fb9f0795c01c25b1178c59d228447ea6925931186cc40357c8",
+      "category-core.js": "7c9b98c5f564005e4cd6cc21564094a24e9b64359ebc325dc678ef261a77d0f1",
+      "gesture-lock.ts": "d6e74d42d293373b3f5224bc41d36b976f67c6d5fa8dbcc906ef2c73bff01945",
+      "model-preprocessing.js": "6b140e48c5dad497f3c6b18619d437873d43a96eb921f1061c849591209728b5"
+    },
+    "checkpoint_sha256": "259f72bc6f95dbe67d0a62f09316a860879bed86609b4a113e1fc0329176d7cc",
+    "dependencies": {
+      "react": "19.2.8",
+      "react-dom": "19.2.8",
+      "@tensorflow/tfjs": "4.22.0",
+      "@mediapipe/tasks-vision": "0.10.32",
+      "vite": "8.2.2"
+    },
+    "measured_at": "2026-10-15T12:24:12+00:00",
+    "start": "Before hand extraction on the first submitted camera frame with a detected hand.",
+    "no_hand_timeout_start": "First submitted camera frame if no hand is ever detected.",
+    "end": "After rendering the first HUDYAT-confirmed result and allowing a browser paint.",
+    "includes": [
+      "hand extraction",
+      "landmark preprocessing",
+      "gesture recording",
+      "model inference",
+      "HUDYAT confidence and stability confirmation",
+      "result rendering"
+    ],
+    "excludes": [
+      "model download and loading",
+      "time before the first submitted hand frame"
+    ]
+  }
+}

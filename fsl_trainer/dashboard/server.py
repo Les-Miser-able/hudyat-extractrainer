@@ -6,6 +6,7 @@ from collections import deque
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import io
 import math
 import mimetypes
 from pathlib import Path
@@ -16,12 +17,14 @@ import sys
 import threading
 from urllib.parse import parse_qs, unquote, urlparse
 
+from ..reporting.benchmark import read_benchmark, benchmark_csv
 from ..paths import PROJECT_ROOT
 from ..data.augmentation_options import extra_samples, time_warp
 from ..data.source_selection import SUPPORTED, VIDEO_EXTENSIONS, source_files, folder_selection
 from ..data.dataset_paths import dataset_name, prepared_datasets, select_dataset
 from ..data.preprocessing import IMAGE, HAND_RELATIVE, preparation_normalization
 from ..data.source_selection import IMAGE_EXTENSIONS
+from .camera_timing import camera_session, save_camera_timing
 from .live import LiveInference
 from .timing import capture_timing
 from .model_records import run_metadata, read_records, save_record
@@ -148,6 +151,7 @@ def runs():
             rows.append({"id": run.relative_to(BASE).as_posix(), "name": run.name,
                          "category": category.name, "classes": len(classes), "class_labels": classes,
                          "metadata": run_metadata(run),
+                         "benchmark": read_benchmark(run, metrics, classes, category.name),
                          "exports": export_options(run),
                          "accuracy": metrics.get("accuracy"), "f1": metrics.get("macro_f1"),
                          "complete": (run / "test_metrics.json").is_file(),
@@ -235,6 +239,28 @@ def build_command(data):
                         "--patience", str(number(data, "patience", 12, 1, 10000, True))]
             if data.get("class_weights") is True:
                 command += ["--class-weights"]
+    elif action == "hudyat-timing":
+        run, row = saved_run(BASE, data.get("run"), runs())
+        if not export_options(run)["hudyat"]:
+            raise ValueError(export_options(run)["reason"])
+        project = data.get("hudyat_project") or str(BASE.parent / "HUDYAT")
+        if not isinstance(project, str) or len(project) > 2000:
+            raise ValueError("Enter the HUDYAT project folder path.")
+        project = (BASE / project).resolve()
+        session = data.get("_job_id") or secrets.token_hex(8)
+        if not isinstance(session, str) or len(session) != 16 or any(c not in "0123456789abcdef" for c in session):
+            raise ValueError("Invalid camera session identifier.")
+        return [sys.executable, "-u", "-B", str(BASE / "tools/prepare_hudyat_timing.py"),
+                "--run", row["id"], "--project", str(project), "--session", session]
+    elif action == "benchmark":
+        run_id = data.get("run")
+        if run_id not in {row["id"] for row in runs()}:
+            raise ValueError("Select an existing saved model for benchmarking.")
+        run = local_path(run_id)
+        if not all((run / name).is_file() for name in ("best.keras", "test_metrics.json",
+                   "training_config.json", "split_manifest.json")):
+            raise ValueError("Benchmarking needs a checkpoint, test metrics, training config, and split manifest.")
+        command += ["benchmark", "--run", str(run)]
     elif action == "export":
         run, row = saved_run(BASE, data.get("run"), runs())
         options = export_options(run)
@@ -285,16 +311,16 @@ class Jobs:
             if self.process and self.process.poll() is None:
                 raise ValueError("A job is already running. Wait or stop it first.")
             job_id = secrets.token_hex(8)
-            command = build_command({**data, '_job_id': job_id} if data.get('action') == 'export' else data)
+            command = build_command({**data, '_job_id': job_id} if data.get('action') in {'export', 'hudyat-timing'} else data)
             process = subprocess.Popen(command, cwd=BASE, stdout=subprocess.PIPE,
                                        stderr=subprocess.STDOUT, text=True, encoding="utf-8",
                                        errors="replace", bufsize=1,
                                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             job = {"id": job_id, "action": data["action"],
-                   "category": Path(data['run']).parent.name if data['action'] == 'export' else data.get("category", "prediction"),
+                   "category": Path(data['run']).parent.name if data['action'] in {'export', 'benchmark', 'hudyat-timing'} else data.get("category", "prediction"),
                    "status": "running",
                    "dataset": data.get("dataset") or data.get("dataset_name"),
-                   "run": data.get("run") if data["action"] in {"predict", "export"} else None,
+                   "run": data.get("run") if data["action"] in {"predict", "export", "benchmark", "hudyat-timing"} else None,
                    "sample": data.get("sample") if data["action"] == "predict" else None,
                    "started": datetime.now().isoformat(timespec="seconds"),
                    "command": subprocess.list2cmdline(command), "exit_code": None,
@@ -357,11 +383,11 @@ class Jobs:
 
 
 class Handler(BaseHTTPRequestHandler):
-    def download(self, handle, filename):
+    def download(self, handle, filename, content_type="application/zip"):
         size = handle.seek(0, 2)
         handle.seek(0)
         self.send_response(200)
-        self.send_header('Content-Type', 'application/zip')
+        self.send_header('Content-Type', content_type)
         self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
         self.send_header('Content-Length', str(size))
         self.send_header('Cache-Control', 'no-store')
@@ -399,6 +425,30 @@ class Handler(BaseHTTPRequestHandler):
                                    "runs": runs(), "model_records": read_records(BASE),
                                    "prediction_tests": read_tests(BASE), "token": self.server.token,
                                    "python": sys.version.split()[0]})
+            if url.path.startswith("/hudyat-timing/"):
+                parts = url.path.split("/", 3)
+                folder, config = camera_session(BASE, parts[2])
+                path = local_path(unquote(parts[3]) if len(parts) > 3 and parts[3] else "index.html", folder)
+                if not path.is_file():
+                    return self.reply({"error": "Camera test file not found."}, 404)
+                payload = path.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", mimetypes.guess_type(path.name)[0] or "application/octet-stream")
+                self.send_header("Content-Length", str(len(payload)))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.end_headers()
+                return self.wfile.write(payload)
+            if url.path == "/api/benchmarks/export":
+                selected = runs()
+                category = query.get("category", [""])[0]
+                if category:
+                    selected = [row for row in selected if row["category"] == category]
+                if query.get("preferred", [""])[0] == "1":
+                    records = read_records(BASE)
+                    selected = [row for row in selected if records.get(row["id"], {}).get("decision") == "Preferred"]
+                payload = benchmark_csv(selected).encode("utf-8-sig")
+                return self.download(io.BytesIO(payload), "model-benchmarks.csv", "text/csv; charset=utf-8")
             if url.path == '/api/model/download':
                 with native_archive(BASE, query.get('run', [''])[0], runs()) as (handle, filename):
                     return self.download(handle, filename)
@@ -430,6 +480,7 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("Run not found.")
                 root = local_path(run_id)
                 return self.reply({"metrics": read_json(root / "test_metrics.json", {}),
+                                   "benchmark": next(row["benchmark"] for row in runs() if row["id"] == run_id),
                                    "history": read_json(root / "history.json", {}),
                                    "classes": read_json(root / "classes.json", [])})
             path = local_path(unquote(url.path).lstrip("/") or "index.html", UI)
@@ -457,12 +508,14 @@ class Handler(BaseHTTPRequestHandler):
                                          f"http://127.0.0.1:{self.server.server_port}"}:
                 return self.reply({"error": "Invalid origin."}, 403)
             size = int(self.headers.get("Content-Length", "0"))
-            limit = 1_000_000 if self.path == "/api/live/frame" else 16384
+            limit = 1_000_000 if self.path == "/api/live/frame" else 512000 if self.path == "/api/hudyat-timing" else 16384
             if not 0 < size <= limit:
                 raise ValueError("Invalid request size.")
             data = json.loads(self.rfile.read(size))
             if not isinstance(data, dict):
                 raise ValueError("Expected a JSON object.")
+            if self.path == "/api/hudyat-timing":
+                return self.reply(save_camera_timing(BASE, data, runs()))
             if self.path == "/api/prediction-test":
                 return self.reply(save_test(BASE, data, runs()))
             if self.path == "/api/model-record":

@@ -1,5 +1,6 @@
 """Dashboard contracts; no ML dependencies or training required."""
 import json
+import csv
 import hashlib
 import io
 from pathlib import Path
@@ -96,6 +97,26 @@ class DashboardTests(unittest.TestCase):
                                            "sample": "data/alphabet/A/sample.jpg"})
         self.assertIn(str(self.source / "sample.jpg"), command)
         self.assertFalse((self.root / "runs" / "alphabet" / "fresh").exists())
+
+    def test_camera_timing_job_reads_hudyat_but_writes_under_trainer(self):
+        (self.run / 'preprocessing.json').write_text(json.dumps({'extraction': {'model_sha256': 'a' * 64}}))
+        command = dashboard.build_command({'action': 'hudyat-timing', 'run': 'runs/alphabet/first',
+                                           'hudyat_project': '../HUDYAT', '_job_id': '0011223344556677'})
+        self.assertEqual(command[3], str(self.root / 'tools/prepare_hudyat_timing.py'))
+        self.assertEqual(command[command.index('--project') + 1], str(self.root.parent / 'HUDYAT'))
+        self.assertEqual(command[command.index('--run') + 1], 'runs/alphabet/first')
+
+    def test_benchmark_command_uses_selected_run_without_retraining(self):
+        (self.run / 'training_config.json').write_text('{}')
+        (self.run / 'split_manifest.json').write_text('[]')
+        command = dashboard.build_command({'action': 'benchmark', 'run': 'runs/alphabet/first'})
+        self.assertEqual(command[-3:], ['benchmark', '--run', str(self.run)])
+        for run_id in ('../outside', 'runs/alphabet/missing'):
+            with self.assertRaises(ValueError):
+                dashboard.build_command({'action': 'benchmark', 'run': run_id})
+        (self.run / 'training_config.json').unlink()
+        with self.assertRaisesRegex(ValueError, 'training config'):
+            dashboard.build_command({'action': 'benchmark', 'run': 'runs/alphabet/first'})
 
     def test_hudyat_export_command_uses_selected_model_and_verified_detector(self):
         detector = self.root / 'assets/hand_landmarker.task'
@@ -263,6 +284,55 @@ class DashboardHTTPTests(unittest.TestCase):
             with error:
                 return error.code, error.read()
 
+    def test_camera_timing_page_and_save_endpoint_are_bound_to_prepared_session(self):
+        session = 'aabbccddeeff0011'
+        run_id = 'runs/colors/camera_timing_fixture'
+        base = Path(self.temp.name)
+        run = base / run_id
+        run.mkdir(parents=True, exist_ok=True)
+        classes = ['blue', 'green', 'orange', 'red', 'violet', 'yellow']
+        (run / 'classes.json').write_text(json.dumps(classes))
+        (run / 'best.keras').write_bytes(b'model')
+        folder = base / 'exports/hudyat-timing' / session
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / 'session.json').write_text(json.dumps({'session': session, 'run': run_id, 'classes': classes,
+            'checkpoint_sha256': hashlib.sha256(b'model').hexdigest(), 'runtime_sources': {'runtime': 'hash'}}))
+        (folder / 'index.html').write_text('<title>Camera timing</title>')
+        self.assertEqual(self.request('/hudyat-timing/' + session + '/')[0], 200)
+        self.assertEqual(self.request('/hudyat-timing/' + session + '/%2e%2e/%2e%2e/model.json')[0], 400)
+        payload = {'session': session, 'device': {'user_agent': 'test browser'},
+                   'trials': [{'target': 'blue', 'predicted': 'blue', 'correct': True, 'timeout': False,
+                               'elapsed_ms': 2200, 'response_ms': 2200}]}
+        headers = {'X-Dashboard-Token': 'test-token'}
+        status, body = self.request('/api/hudyat-timing', payload, headers)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)['benchmark']['response_time_ms'], 2200)
+        self.assertEqual(self.request('/api/hudyat-timing', {**payload, 'session': '../outside'}, headers)[0], 400)
+
+    def test_benchmark_csv_matches_category_and_preferred_filters(self):
+        from fsl_trainer.reporting.benchmark import save_benchmark
+        run_id = 'runs/colors/benchmark_fixture'
+        run = Path(self.temp.name) / run_id
+        run.mkdir(parents=True, exist_ok=True)
+        classes = ['blue', 'red', 'green', 'yellow', 'black', 'white']
+        metrics = {'accuracy': .9, 'macro_f1': .9, 'per_class': {
+            label: {'precision': .9, 'recall': .9, 'f1': .9, 'support': 10} for label in classes}}
+        (run / 'classes.json').write_text(json.dumps(classes))
+        (run / 'test_metrics.json').write_text(json.dumps(metrics))
+        (run / 'camera_timing.json').write_text(json.dumps({'timing': {'scope': 'hudyat_camera_to_result', 'median_ms': 100, 'samples': 30, 'tested_signs': classes, 'timeouts': 0}}))
+        save_benchmark(run, metrics, classes, None)
+        dashboard.save_record(Path(self.temp.name), {'run': run_id, 'decision': 'Preferred'}, dashboard.runs())
+        with urlopen(self.origin + '/api/benchmarks/export?category=colors&preferred=1', timeout=5) as response:
+            self.assertEqual(response.headers['Content-Type'], 'text/csv; charset=utf-8')
+            self.assertIn('model-benchmarks.csv', response.headers['Content-Disposition'])
+            rows = list(csv.DictReader(io.StringIO(response.read().decode('utf-8-sig'))))
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['Run'], 'benchmark_fixture')
+        self.assertEqual(rows[0]['Macro precision (>=85%)'], '90.000000%')
+        self.assertEqual(rows[0]['Met benchmark?'], 'Met')
+        detail = json.loads(self.request('/api/run?id=' + run_id)[1])
+        self.assertEqual(detail['benchmark']['lowest_sign_recall'], .9)
+
     def test_pages_and_results_are_served(self):
         for path in ["/", "/style.css", "/app.js", "/api/jobs"]:
             with self.subTest(path=path):
@@ -354,12 +424,16 @@ class DashboardHTTPTests(unittest.TestCase):
         (run / 'best.keras').write_bytes(b'actual model')
         (run / 'classes.json').write_text('["afternoon", "evening"]')
         (run / 'preprocessing.json').write_text('{}')
+        (run / 'benchmark.json').write_text('{}')
+        (run / 'benchmark.csv').write_text('Model,Signs')
         with urlopen(self.origin + '/api/model/download?run=' + run_id, timeout=5) as response:
             self.assertEqual(response.headers['Content-Type'], 'application/zip')
             self.assertIn('model.zip', response.headers['Content-Disposition'])
             with ZipFile(io.BytesIO(response.read())) as archive:
                 self.assertEqual(archive.read('best.keras'), b'actual model')
                 self.assertIn('model-record.json', archive.namelist())
+                self.assertIn('benchmark.json', archive.namelist())
+                self.assertIn('benchmark.csv', archive.namelist())
         self.assertEqual(self.request('/api/model/download?run=../outside')[0], 400)
         job_id = '1122334455667788'
         bundle = Path(self.temp.name) / 'exports/hudyat' / (job_id + '.zip')
