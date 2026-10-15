@@ -16,6 +16,9 @@ __pycache__/
 !/runs/*/*/video_augmentation_report.json
 !/runs/*/*/model_summary.txt
 !/runs/*/*/test_metrics.json
+!/runs/*/*/benchmark.json
+!/runs/*/*/benchmark.csv
+!/runs/*/*/camera_timing.json
 !/runs/*/*/history.json
 !/runs/*/*/history.csv
 !/runs/*/*/epoch_times.json

@@ -1,0 +1,2 @@
+Model,Run,Signs,Required signs,Accuracy (>=85%),Macro precision (>=85%),Macro recall (>=85%),Macro F1 (>=85%),Lowest sign recall (>=70%),Lowest recall signs,Response time (<1000 ms),Timing scope,Met benchmark?,Missing / failed checks
+Greetings,greetings-prototype1-MODEL,10,10,97.142857%,97.500000%,97.142857%,97.128205%,85.714286%,"good_afternoon, good_morning",2127.900000,hudyat_camera_to_result,Not met,response_time_ms: failed

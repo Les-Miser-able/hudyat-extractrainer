@@ -396,6 +396,9 @@ def evaluation(y_true, probabilities, classes):
     f1 = np.divide(2*precision*recall, precision+recall,
                    out=np.zeros(len(classes)), where=(precision+recall)>0)
     return {"accuracy": float(np.mean(predicted == y_true)), "macro_f1": float(f1.mean()),
+            "macro_precision": float(precision.mean()), "macro_recall": float(recall.mean()),
+            "lowest_sign_recall": float(recall.min()),
+            "lowest_recall_signs": [label for i, label in enumerate(classes) if recall[i] == recall.min()],
             "confusion_matrix_rows_true_columns_predicted": cm.tolist(), "classes": classes,
             "per_class": {label: {"precision": float(precision[i]), "recall": float(recall[i]),
                                   "f1": float(f1[i]), "support": int(cm[i].sum())}
@@ -523,7 +526,15 @@ def train(args):
     truth = np.array([label_ids[r["label"]] for r in splits["test"]])
     report = evaluation(truth, probabilities, classes)
     report["loss"] = float(loss)
+    from .benchmark import measure_latency
+    from ..reporting.benchmark import save_benchmark
+    indices = np.linspace(0, len(splits["test"]) - 1, min(len(splits["test"]), 30), dtype=int)
+    timing_samples = [load_sequence(root / splits["test"][i]["path"], fixed=True) for i in indices]
+    with Stage("Measuring local model response time"):
+        timing = measure_latency(best, timing_samples, classes)
+    timing["tensorflow_version"] = tf.__version__
     save_json(output / "test_metrics.json", report)
+    save_benchmark(output, report, classes, timing)
     from ..reporting.confusion_matrix import save_confusion_matrix
     with Stage("Saving test confusion matrices"):
         save_confusion_matrix(report, output)
@@ -617,6 +628,10 @@ def main():
     infer.add_argument("--sample", required=True)
     infer.add_argument("--hand-model", help="Custom MediaPipe .task file used during training")
     infer.set_defaults(func=predict)
+    bench = sub.add_parser("benchmark", help="Measure local inference and export the benchmark table for a saved run")
+    bench.add_argument("--run", required=True)
+    from .benchmark import benchmark_run
+    bench.set_defaults(func=benchmark_run)
     args = parser.parse_args()
     try:
         if args.command == "prepare" and args.jitter == 0:

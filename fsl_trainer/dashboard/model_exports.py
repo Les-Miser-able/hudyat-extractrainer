@@ -15,7 +15,7 @@ from .prediction_tests import export_model
 
 REQUIRED = ('best.keras', 'classes.json', 'preprocessing.json')
 OPTIONAL = ('training_config.json', 'model_summary.txt', 'history.json', 'history.csv',
-            'test_metrics.json', 'epoch_times.json', 'confusion_matrix.png',
+            'test_metrics.json', 'benchmark.json', 'benchmark.csv', 'camera_timing.json', 'epoch_times.json', 'confusion_matrix.png',
             'confusion_matrix_normalized.png', 'confusion_matrix.csv',
             'confusion_matrix_normalized.csv')
 
@@ -132,6 +132,12 @@ def write_hudyat_bundle(base, run_id, known_runs, output, hand_model=None):
             for name in ('install_hudyat.py', 'runtime_support.py', 'model-preprocessing.js',
                          'model-preprocessing.d.ts', 'model-preprocessing.test.mjs'):
                 archive.write(base / 'integrations/hudyat' / name, name)
+            for name in ('benchmark.json', 'benchmark.csv', 'camera_timing.json'):
+                path = run / name
+                if path.is_file():
+                    if run not in path.resolve().parents:
+                        raise ValueError('Benchmark artifacts must stay inside their saved run.')
+                    archive.write(path, name)
             archive.writestr('model-record.json', json.dumps(snapshot, indent=2, ensure_ascii=False, allow_nan=False))
             archive.writestr('HUDYAT_IMPORT.md',
                 '# Import ' + row['category'] + ' / ' + row['name'] + '\n\n'

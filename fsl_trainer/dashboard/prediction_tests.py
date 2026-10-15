@@ -9,6 +9,7 @@ import tempfile
 import threading
 from uuid import uuid4
 
+from ..reporting.benchmark import read_benchmark
 from .model_records import _read, read_records, validate_record
 
 _LOCK = threading.RLock()
@@ -45,7 +46,10 @@ def model_snapshot(base, run_id, known_runs):
     return deepcopy({**run, 'record': read_records(base).get(run_id, {}),
                      'training_config': _read(path / 'training_config.json', {}),
                      'preprocessing': _read(path / 'preprocessing.json', {}),
-                     'metrics': _read(path / 'test_metrics.json', {})})
+                     'metrics': _read(path / 'test_metrics.json', {}),
+                     'camera_timing': _read(path / 'camera_timing.json', {}),
+                     'benchmark': read_benchmark(path, _read(path / 'test_metrics.json', {}),
+                                                 run.get('class_labels', []), run['category'])})
 
 
 def _prediction(value, model):

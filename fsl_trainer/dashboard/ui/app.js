@@ -234,12 +234,30 @@ async function useRecordedRun(id, settings = null) {
   renderLiveTiming(); controls();
   location.hash = 'predict';
 }
+function benchmarkTable(rows) {
+  if (!rows.length) return empty('No matching models for the benchmark table.');
+  return `<table class="benchmark-table"><thead><tr><th>Model / run</th><th>Signs</th><th>Accuracy (≥85%)</th><th>Macro precision (≥85%)</th><th>Macro recall (≥85%)</th><th>Macro F1 (≥85%)</th><th>Lowest sign recall (≥70%)</th><th>Response time (&lt;1,000 ms)</th><th>Met benchmark?</th><th>Actions</th></tr></thead><tbody>${rows.map(r => {
+    const b = r.benchmark || {}, timing = b.timing || {};
+    const missing = Object.entries(b.checks || {}).filter(([, value]) => value !== true)
+      .map(([key, value]) => `${key.replaceAll('_', ' ')}: ${value === null ? 'missing' : 'failed'}`).join('; ');
+    const timed = typeof b.response_time_ms === 'number' && Number.isFinite(b.response_time_ms);
+    return `<tr><td><strong>${escapeHTML(title(r.category))}</strong><small>${escapeHTML(r.name)}</small></td>
+      <td>${recordValue(b.signs ?? r.classes)}<small>Required: ${recordValue(b.required_signs)}</small></td>
+      ${['accuracy', 'macro_precision', 'macro_recall', 'macro_f1'].map(key => `<td>${recordPercent(b[key])}</td>`).join('')}
+      <td>${recordPercent(b.lowest_sign_recall)}<small>${escapeHTML((b.lowest_recall_signs || []).join(', '))}</small></td>
+      <td>${timed ? b.response_time_ms.toFixed(2) + ' ms' : 'Not measured'}<small>${timed ? 'HUDYAT camera-to-result · median' : 'Run the HUDYAT camera test'}</small>${typeof timing.p95_ms === 'number' ? `<small>p95: ${timing.p95_ms.toFixed(2)} ms · ${fmt(timing.samples)} trials</small>` : ''}</td>
+      <td><span class="tag ${b.status === 'Met' ? 'completed' : ''}">${escapeHTML(b.status || 'Incomplete')}</span><small>${escapeHTML(missing)}</small></td>
+      <td><button class="button secondary benchmark-model-action" type="button" data-benchmark-run="${escapeHTML(r.id)}" data-available="${Boolean(r.checkpoint && r.complete)}" ${r.checkpoint && r.complete ? '' : 'disabled'}>Measure local inference</button><button class="button secondary benchmark-model-action" type="button" data-hudyat-timing-run="${escapeHTML(r.id)}" data-available="${Boolean(r.exports?.hudyat)}" ${r.exports?.hudyat ? '' : 'disabled'}>HUDYAT camera test</button>${typeof b.local_inference?.median_ms === 'number' ? `<small>Local inference only: ${b.local_inference.median_ms.toFixed(2)} ms</small>` : ''}</td></tr>`;
+  }).join('')}</tbody></table>`;
+}
+
 function renderRuns() {
   const filter = $('run-filter').value;
   const preferredOnly = $('run-preferred-only').checked;
   const rows = state.runs.filter(r => (!filter || r.category === filter)
     && (!preferredOnly || modelRecord(r.id).decision === 'Preferred'));
   $('all-runs').innerHTML = modelRecordsTable(rows);
+  $('benchmark-table').innerHTML = benchmarkTable(rows);
   $('run-record-summary').textContent = `${rows.length} saved runs shown. Preferred models are selected manually, one per category.`;
   renderTestHistory();
 }
@@ -352,7 +370,7 @@ async function scan() {
 function controls() {
   const active = jobs.some(j => j.status === 'running');
   document.querySelectorAll('.submit-job').forEach(b => { b.disabled = loading || submitting || active || liveActive || !token; });
-  document.querySelectorAll('.export-model-action').forEach(b => {
+  document.querySelectorAll('.export-model-action, .benchmark-model-action').forEach(b => {
     b.disabled = loading || submitting || active || liveActive || !token || b.dataset.available !== 'true';
   });
   $('model-export-start').disabled ||= !state.runs.some(r => r.id === exportingRun && (r.exports?.hudyat ?? r.checkpoint));
@@ -427,6 +445,8 @@ function renderJob() {
   $('cancel-job').dataset.id = job.id;
   $('download-export').hidden = job.action !== 'export' || job.status !== 'completed';
   $('download-export').dataset.id = job.id;
+  $('open-hudyat-timing').hidden = job.action !== 'hudyat-timing' || job.status !== 'completed';
+  $('open-hudyat-timing').href = `/hudyat-timing/${encodeURIComponent(job.id)}/`;
   const prediction = jobs.find(j => j.action === 'predict' && j.status === 'completed');
   if (prediction) {
     const output = prediction.logs.join('\n');
@@ -621,7 +641,7 @@ async function openRun(id) {
     if (version !== runVersion) return;
     const run = state.runs.find(r => r.id === id);
     $('run-detail-title').textContent = run ? `${title(run.category)} / ${run.name}` : id;
-    $('run-metrics').innerHTML = stat('Test accuracy', percent(detail.metrics.accuracy), 'Held-out samples', '↗') + stat('Macro F1', percent(detail.metrics.macro_f1), 'Equal weight per class', '◎') + stat('Epochs recorded', fmt((detail.history.accuracy || []).length), `${fmt(detail.classes.length)} gesture classes`, '⌁');
+    $('run-metrics').innerHTML = stat('Test accuracy', percent(detail.metrics.accuracy), 'Held-out samples', '↗') + stat('Macro precision', percent(detail.benchmark?.macro_precision), 'Equal weight per sign', '◎') + stat('Macro recall', percent(detail.benchmark?.macro_recall), 'Equal weight per sign', '◎') + stat('Macro F1', percent(detail.metrics.macro_f1), 'Equal weight per class', '◎') + stat('Lowest sign recall', percent(detail.benchmark?.lowest_sign_recall), escapeHTML((detail.benchmark?.lowest_recall_signs || []).join(', ')), '◎') + stat('Epochs recorded', fmt((detail.history.accuracy || []).length), `${fmt(detail.classes.length)} gesture classes`, '⌁');
     $('learning-chart').innerHTML = chart(detail.history);
     $('run-classes').innerHTML = detail.classes.map(c => `<span class="chip">${escapeHTML(c)}</span>`).join('');
     $('use-run').disabled = !run?.checkpoint;
@@ -637,6 +657,10 @@ for (const [id, action] of [['prepare-form', 'prepare'], ['train-form', 'train']
   });
 }
 document.addEventListener('click', event => {
+  const cameraTest = event.target.closest('[data-hudyat-timing-run]');
+  if (cameraTest) { startJob({action: 'hudyat-timing', run: cameraTest.dataset.hudyatTimingRun, hudyat_project: $('hudyat-project').value}); return; }
+  const benchmark = event.target.closest('[data-benchmark-run]');
+  if (benchmark) { startJob({action: 'benchmark', run: benchmark.dataset.benchmarkRun}); return; }
   const downloadModelZip = event.target.closest('[data-download-model-zip]');
   if (downloadModelZip) downloadRecord(`/api/model/download?run=${encodeURIComponent(downloadModelZip.dataset.downloadModelZip)}`);
   const exportModel = event.target.closest('[data-export-model]');
@@ -680,6 +704,7 @@ $('train-dataset').addEventListener('change', controls);
 $('source-folder-mode').addEventListener('change', controls);
 $('source-folder-options').addEventListener('change', controls);
 $('source-videos-only').addEventListener('change', controls);
+$('download-benchmarks').addEventListener('click', () => downloadRecord(`/api/benchmarks/export?category=${encodeURIComponent($('run-filter').value)}&preferred=${$('run-preferred-only').checked ? '1' : '0'}`));
 $('run-filter').addEventListener('change', renderRuns);
 $('run-preferred-only').addEventListener('change', renderRuns);
 $('model-export-form').addEventListener('submit', event => {

@@ -11,7 +11,11 @@ In **Model runs**, each trained model has these actions:
 
 The HUDYAT ZIP contains versioned browser weights, metadata, parity fixtures,
 the matching MediaPipe detector, and a catalog with just the selected category.
-It also includes the model's recorded description and testing history.
+It also includes the model's recorded description and testing history. When
+available, `benchmark.json` and `benchmark.csv` carry the held-out metrics
+and the full camera timing from the trainer's HUDYAT camera test. Local inference
+is recorded separately. `camera_timing.json` contains the measured trials and
+source/device details. These reports do not change the model/runtime contract.
 
 Extract the ZIP. In its extracted folder, run:
 

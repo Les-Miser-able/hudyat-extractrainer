@@ -1,0 +1,2 @@
+Model,Run,Signs,Required signs,Accuracy (>=85%),Macro precision (>=85%),Macro recall (>=85%),Macro F1 (>=85%),Lowest sign recall (>=70%),Lowest recall signs,Response time (<1000 ms),Timing scope,Met benchmark?,Missing / failed checks
+Colors,colors-prototype1-MODEL,6,6,100.000000%,100.000000%,100.000000%,100.000000%,100.000000%,"blue, green, orange, red, violet, yellow",2117.400000,hudyat_camera_to_result,Not met,response_time_ms: failed
