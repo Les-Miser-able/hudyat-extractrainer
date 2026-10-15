@@ -1,662 +1,691 @@
-# FSL Conv1D–BiLSTM trainer
+# FSL Studio — Conv1D–BiLSTM Trainer
 
-For a fresh clone, PWA asset setup, and first-push instructions, see
-[REPOSITORY.md](docs/REPOSITORY.md). Trained models are included; training data stays local.
-The [project layout](docs/REPOSITORY.md#project-layout) groups Python implementations
-under `fsl_trainer/` and checks under `tests/`; existing root Python commands
-and imports remain supported. Project setup and verification records live in
-`docs/`; lessons, references, and learning notes live in [learning/](learning/README.md).
+A local workspace for preparing Filipino Sign Language (FSL) datasets, training
+gesture classifiers, and testing saved models. FSL Studio combines a desktop or
+browser dashboard with Python command-line tools, live camera testing, and
+browser model exports for FSL Pocket and HUDYAT.
 
-Augmentation development folders and output conventions are documented in
-[augmentation/README.md](augmentation/README.md).
+Static poses and moving gestures share the same **32-frame × 128-feature** input
+and Conv1D–BiLSTM network. Each category has its own model and gesture labels;
+select the category/model when predicting.
 
-A TensorFlow trainer with automatic hand-landmark extraction from raw images and videos. Existing normalized .npy landmarks are also accepted. Static poses and dynamic gestures use the same (32, 128) input, classifier and saved Keras model. No per-letter special cases.
+## Features
 
-## Alphabet landmark preprocessing
+| Area | What the project supports |
+|---|---|
+| Training dashboard | Source counts, named datasets, configurable training, learning curves, saved-run comparisons, and streamed job logs with cancellation. |
+| Landmark extraction | Local two-hand MediaPipe extraction from images/videos, plus compatible pre-extracted `.npy` inputs. |
+| Dataset preparation | Source-folder and videos-only filters, group-aware splits, duplicate checks, provenance, and validation. |
+| Preprocessing and augmentation | Hand-relative alphabet features that preserve movement, static-pose variants, and optional training-only sequence timing variations. |
+| Model training | Separate category models, optional class weights, early stopping, best checkpoints, packed disk caches, and checkpoint continuation. |
+| Evaluation | Per-class and macro metrics, confusion matrices, benchmark CSVs, local inference diagnostics, and HUDYAT camera timing. |
+| Live prediction | Held poses, one-gesture capture, continuous movement capture, and adjustable recognition delays. |
+| Experiment records | Preferred models, saved camera settings, notes, and independent prediction test histories. |
+| Model delivery | Keras ZIP downloads, HUDYAT bundles with an importer, and FSL Pocket browser exports with parity fixtures. |
 
-New raw-media alphabet datasets prepared through the dashboard or `categories.py`
-use `hand-relative-sequence-v1`. Other categories and supplied-landmark-only
-datasets retain their original preprocessing defaults. Existing datasets and
-checkpoints are not converted. Select **Original image coordinates**, or pass
-`--normalization image`, to reproduce the previous alphabet preparation.
+For a guided walkthrough, see the [user guide](USER_GUIDE.md).
+[Repository setup](docs/REPOSITORY.md) covers fresh clones and artifact conventions.
+Trained checkpoints, browser exports, and the shared hand detector are included.
+Original recordings, prepared datasets, and caches stay local and must be
+transferred separately when cloning the repository.
 
-The new convention converts x/y/z to pixel units using the frame dimensions,
-centers each detected hand on its wrist, and divides by pixel palm length
-(wrist to middle-finger knuckle). Landmarks 1–20 carry this per-frame hand shape.
-Landmark 0 carries wrist displacement from its first valid position, divided by
-the sequence's median pixel palm length. This retains trajectories needed for
-J/Z while reducing sensitivity to image placement, hand size, and aspect ratio.
-It cannot remove changes in perspective, occlusion, or incorrect detections.
+## Contents
 
-For static images, the training split keeps one clean original and generates
-the remaining requested variants with ±15° rotation, 50% mirroring (including
-hand-slot swaps), and jitter of **0.03 palm lengths** by default. Validation and
-test keep **one clean sequence per accepted source**, with no augmentation.
-Videos retain their full normalized motion and the existing optional training-only
-timing augmentation. Group splitting, input shape, network, and optimizer are unchanged.
+- [Quick start](#quick-start)
+- [Source data](#source-data)
+- [Dataset preparation](#dataset-preparation)
+- [Training and evaluation](#training-and-evaluation)
+- [Live camera prediction](#live-camera-prediction)
+- [Model comparison and test records](#model-comparison-and-test-records)
+- [Automated benchmarks](#automated-benchmarks)
+- [Downloads and browser exports](#downloads-and-browser-exports)
+- [Project layout](#project-layout)
+- [Verification](#verification)
+- [Troubleshooting](#troubleshooting)
 
-Prepare and train a fresh version to use these features:
+## Quick start
 
-```powershell
-.\.venv\Scripts\python.exe categories.py prepare --category alphabet --dataset-name hand_relative_v1
-.\.venv\Scripts\python.exe categories.py train --category alphabet --dataset-name hand_relative_v1 --run hand_relative_v1 --class-weights
-```
-
-For the lower-level `trainer.py prepare` command, explicitly pass
-`--normalization hand-relative-sequence-v1`; its default remains the legacy path.
-Leave Jitter empty in the dashboard for the profile's default. Explicit jitter
-values use the selected profile's coordinate units. Hand-relative preparation
-requires original images/videos: supplied `.npy` arrays lack image dimensions
-and cannot be mixed into it. Legacy `.npy` workflows continue to work unchanged.
-
-Saved preprocessing metadata automatically selects the correct features for
-raw-file prediction, desktop webcam inference, and PWA inference. Normalized
-`.npy` prediction inputs must already follow the run's feature convention.
-Resume rejects checkpoints with different preprocessing; train a fresh model
-instead of applying hand normalization to old weights. PWA exports include
-camera-preprocessing parity fixtures as well as model-output parity fixtures.
-
-For live checks, use **Held pose** for static letters and a movement mode for
-J/Z. The new representation also supports movement capture, but entry/ending
-motion should be evaluated on independent webcam recordings. A high prepared
-test score still does not establish live accuracy.
-
-## Automated benchmark metrics
-
-**Model runs → Benchmark metrics** shows accuracy, macro precision, macro recall,
-macro F1, lowest sign recall (including tied sign names), response time, and an
-automatic **Met / Not met / Incomplete** result. The category and Preferred filters
-also apply to **Download metrics CSV**.
-
-Accuracy, macro precision, macro recall, and macro F1 each require at least 85%;
-lowest sign recall requires at least 70%; response time must be strictly below
-1,000 ms. Every saved class participates in macro averages with equal weight.
-Zero denominators produce zero precision/recall/F1. Every class needs held-out test
-support. Required class counts: Alphabet 26, Numbers 10, Colors 6, Greetings 10.
-A model with fewer or more classes cannot pass that category benchmark; categories
-without a specified required count remain incomplete. Checks use unrounded values.
-Any failed check gives Not met; otherwise missing evidence gives Incomplete.
-All checks must pass for Met.
-
-New training runs automatically save the extra metrics in `test_metrics.json`
-and write `benchmark.json` and `benchmark.csv` beside the checkpoint. These files
-are included in model ZIPs and HUDYAT export ZIPs. Model-record JSON downloads
-also include the derived benchmark summary and timing metadata. Legacy runs
-derive missing aggregates from saved per-class scores when available; browsing
-does not rewrite original scores. Choose **Measure local inference** to time an
-existing checkpoint without retraining. The saved dataset/test files must still be available.
-The same operation is available from the repository root:
+Run these commands from the repository root in Windows PowerShell.
+**Python 3.12 on Windows CPU** is the verified environment; `requirements.txt`
+pins its dependencies. Node.js 22 or newer is used for the optional PWA workflow.
+HUDYAT camera tests additionally need an existing HUDYAT checkout with its
+JavaScript dependencies installed.
 
 ```powershell
-.\.venv\Scripts\python.exe -B trainer.py benchmark --run "runs/alphabet/my-model"
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-The response-time requirement uses **full HUDYAT camera-to-confirmed-result time**.
-Choose **HUDYAT camera test** beside a model and supply the HUDYAT checkout path
-(default `../HUDYAT`, read only). Preparation exports the selected model into
-`exports/hudyat-timing/<session>/` and builds a standalone browser page from the
-actual HUDYAT recognition, preprocessing, and confirmation sources using HUDYAT's
-installed Vite/React/TensorFlow.js/MediaPipe dependencies. It replaces only model
-asset transport and adds timing hooks. HUDYAT files and database are untouched.
+### Open FSL Studio
 
-Open the test from Activity, start the camera in the target browser, select the
-expected sign, and begin a trial. Timing starts before extraction on the first
-submitted camera frame with a detected hand and stops after the first confirmed
-result is rendered and allowed to paint. Hand extraction, preprocessing, recording,
-inference, confidence/stability gates, and result rendering are included. Model
-downloads/loading and time before the first submitted hand frame are excluded.
-This measures the HUDYAT recognition flow in the trainer test page; deployed app
-network/UI integration should be evaluated separately if it changes this flow.
-
-Perform every model sign, then **Save timing results**. No camera images/videos
-are saved. `camera_timing.json` retains individual expected/confirmed signs, wrong
-confirmations, 15-second timeouts (including never detecting a hand), response times,
-per-session browser/camera/TF.js backend details, checkpoint hash, and hashes of the
-HUDYAT source files. Sessions
-are retained separately; the latest saved session supplies the table's median
-and p95. All signs need measured responses and any timeout fails completion.
-Missing camera measurements cannot pass; local inference never substitutes for
-them. Model/ZIP downloads include these camera reports.
-
-The current HUDYAT code requires at least 1.2 seconds of stable alphabet estimates
-and records two-second clips for other categories. The existing full recognition
-flow therefore cannot meet a sub-second requirement from first hand frame. This
-trainer records that outcome without changing HUDYAT's rules.
-
-**Measure local inference** and the CLI command above provide an additional
-diagnostic: 30 single-sequence predictions after 3 warmups, using up to 30 evenly
-spaced held-out prepared samples. Output transfer and label selection are included;
-camera and confirmation are excluded. These diagnostic timings do not determine
-the response-time benchmark.
-
-## Local training dashboard
-
-On Windows, install the optional desktop window dependency into the Python
-environment you use for training, then start FSL Studio from the repository root:
+Install the optional desktop dependency and launch the dashboard:
 
 ```powershell
-python -m pip install -r requirements-desktop.txt
-python dashboard.py
+.\.venv\Scripts\python.exe -m pip install -r requirements-desktop.txt
+.\.venv\Scripts\python.exe dashboard.py
 ```
 
-FSL Studio opens in its own resizable desktop window, with no browser tabs or
-address bar. It displays the existing dashboard using Microsoft Edge WebView2;
-no interface rewrite, executable packaging, or installer is needed. The terminal
-stays available for diagnostics. If the window cannot open, install or repair the
-[Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/).
-
-To use a browser instead (also supported outside Windows), run
-`python dashboard.py --browser` and open **http://localhost:8090**. Browser mode
-does not need the desktop dependencies.
-
-FSL Studio provides an overview of real source
-counts and model scores, dataset preparation and validation, configurable training,
-saved-run comparisons with learning curves, and prediction from a project-local
-image, video, or `.npy` file. Activity logs stream while jobs run; use **Stop job**
-to cancel. Partial outputs are kept, so choose a new output folder/run name to retry.
-
-The dashboard's browser mode uses only Python's standard library. Preparation, training,
-and prediction use the **same Python environment that starts the dashboard** and
-need the dependencies in `requirements.txt`. If using the quick-start environment,
-launch it with `.\.venv\Scripts\python.exe dashboard.py`. Browsing saved results
-does not require TensorFlow. Install desktop dependencies with
-`.\.venv\Scripts\python.exe -m pip install -r requirements-desktop.txt` when using
-that environment. Use `--port 8091` if the default port is occupied.
-
-Closing the desktop window stops the local server and camera workers. If a job
-is running, FSL Studio asks before stopping it; Cancel keeps the window and job
-running. Confirming exit keeps partial outputs. In browser mode, stop the server
-with Ctrl+C in its terminal.
-
-The default source root is `data`, dataset root is `datasets_augmented`, and model
-root is `runs`. Change the first two under **Datasets → Project folders → Scan
-folders** to use another source or dataset root. Paths must stay inside
-the project. Existing datasets and runs are protected from overwrite. Add source
-files through your file manager, then refresh the dashboard. Enter an editable
-**Dataset name** when preparing: output is saved under
-`datasets_augmented/<category>/<dataset name>/`. The output preview updates while
-you type. Keep the existing split, augmentation, source filtering, and extraction
-controls to configure each version independently. Use a new name for each version;
-existing and partial outputs are protected from overwrite.
-
-Each category lists its saved datasets with a **Validate dataset** button for each
-one. Under **Training**, choose the category and **Prepared dataset**; the displayed
-path is passed to training and saved in that run's training configuration. Prediction
-continues using the run's checkpoint and copied preprocessing settings. Existing
-datasets directly under `<dataset root>/<category>/` remain selectable as
-**Original dataset**; no data is moved automatically. A manifest indicates a saved
-dataset; **Validate dataset** performs the full trainer check.
-The dashboard starts one job at a time and binds only to loopback. Activity history
-is held in memory until restart; generated artifacts remain in the usual folders.
-
-**Model runs → Model comparison** shows each saved run's recorded dataset,
-source folders, original/prepared sample counts, training and augmentation
-parameters, offline metrics, and your recorded live settings. Filter by category
-or **Preferred only**; class lists are available in each model row. Missing
-metadata is shown as —, and live settings remain blank until recorded.
-
-Choose **Edit record** to mark a run Not tested, Testing, Preferred, or Rejected
-and save notes, tested delays, mode, trial counts, recognition time, date, and
-device/session. There is one preferred run per category: selecting another moves
-the previous choice back to Testing while keeping its notes. **Try model** opens
-prediction with that run and restores its recorded mode and slider values.
-**Record current settings**, beside the camera controls, saves the selected
-model's mode and current sliders without interrupting an active capture.
-These manual records persist in `runs/model_records.json` across dashboard
-restarts. They do not change checkpoints, training data, or saved test metrics.
-
-**Download record** exports a model's current record, full saved training and
-preprocessing configuration, dataset metadata, offline scores, class labels,
-and prediction test history as a JSON file.
-
-**Download model ZIP** saves the actual trained Keras model with its labels,
-preprocessing, record, and available reports. **Export for HUDYAT** creates a
-browser model bundle in a background job; download it from Activity when ready.
-The ZIP includes an importer that preserves HUDYAT's other category releases
-and supports the selected model's camera preprocessing. Importing prepares its
-files; HUDYAT's `npm run models:register` activates the release separately.
-See [HUDYAT model export](integrations/hudyat/README.md) for the full workflow.
-
-After trying a sample or live camera prediction, choose **Save as test run**.
-Each model gets independent names such as **Test 1**, **Test 2**, and so on;
-you can also enter a custom name. The test keeps a snapshot of the model's
-description and original record, its tested camera settings, your notes and
-device/session, and the latest prediction from that model. Live trial counts,
-correct counts, and median recognition time are manual observations; new tests
-leave these blank until measured. Saving the same test again edits that test.
-Choose **Save as test run** again to create the next test.
-
-Under **Model runs → Prediction test runs**, filter by model, review each test's
-model details, edit observations, **Download test** as JSON, or **Try these
-settings** to repeat a test with its recorded camera settings. Tests persist in
-`runs/prediction_tests.json` after restarting. Each test references the trained
-model rather than copying its checkpoint or starting another training job.
-
-The existing [FSL Pocket webcam app](pwa-sample/README.md) remains available
-separately. Its setup/export workflow is unchanged.
-
-**Try a prediction → Live camera prediction** uses the trained run selected above
-the camera panel. The default **Perform once** mode automatically captures one
-gesture: show your hands, perform the complete gesture, then hold the ending
-still for about 600 ms. The result stays displayed even if you keep holding
-the ending or lower your hands. Select **Next gesture** to reset capture without
-reloading the camera or model. **Moving gesture** continuously captures complete
-movements, holds each completed result, and automatically starts capture when
-you move again. **Next gesture** can also clear or retry this mode. **Held pose**
-classifies the current pose. Press **Start camera** and
-allow camera access. Frames are processed serially, by default at up to 20 times per
-second depending on CPU speed. Processing time counts toward the selected target
-interval; slow frames do not incur an additional fixed pause. **Stop camera**, leaving
-the prediction view, or hiding the tab ends capture; abandoned workers expire
-after 60 seconds without frames. Stop live prediction before running other jobs.
-
-The dashboard keeps one Python inference worker and checkpoint loaded per live
-session, using the run's extraction confidence, handedness swap, and verified hand
-model asset. The optional sample form's **Custom hand model** also applies to live
-prediction. Runs without extraction metadata support normalized `.npy` file
-prediction but cannot use the camera. No model export or browser ML dependencies
-are needed for this dashboard feature. Launch the dashboard with the Python
-environment containing `requirements.txt`.
-
-If `/api/live/start` returns 404 after updating the project, the running dashboard
-still has the previous Python code loaded. Finish any active job, stop the server,
-restart `dashboard.py` in the same Python environment (with `--browser` if using
-browser mode), and reopen the camera.
-Refreshing the page alone updates browser files but does not reload Python routes.
-
-Camera frames travel only to the local dashboard worker and are not written to
-disk. The preview is mirrored visually; input pixels remain unmirrored. Held
-poses repeat the current landmarks to 32 frames. Both movement modes interpolate
-the entire captured interval to 32 frames, retaining up to 600 ms before movement
-onset. The former two-second rolling window no longer discards early transitions
-or replaces completed gestures with their held ending poses.
-No inference augmentation is applied. Scores below 60% show uncertainty.
-
-The **Recognition timing** sliders remain editable while the camera runs:
-**Stillness delay** and **Hands missing delay** range from 100 to 2,000 ms,
-and **Frame interval** ranges from 20 to 500 ms. Defaults are 600, 400, and
-50 ms respectively. Changes apply on the next camera frame, keeping the same
-worker, loaded model, and capture buffer. The finish delays apply to both
-movement modes; frame interval applies to every mode. Lower finish delays
-respond sooner but can end capture during pauses or tracking gaps. Actual frame
-rate depends on processing speed. Settings remain selected across camera stops
-and starts within the page; reloading the page restores defaults.
-
-Automatic capture starts after two consecutive moving frames and finishes after
-600 ms of stillness or 400 ms without detected hands by default. Brief missing-hand frames
-stay zero-filled within the sequence. Motion uses mean XY landmark displacement
-per second (threshold 0.04 in image-normalized units); movement must accumulate
-at least 0.025 image units. These are initial heuristics, not learned gesture
-boundaries. A pause within a gesture can end capture early; camera shake can
-trigger capture. Keep the camera steady and use **Next gesture** to retry.
-Captures exceeding six seconds or the 512-frame limit are rejected without
-classifying a truncated sequence. A frame-delivery pause longer than one second
-resets an unfinished capture. Perform once holds its result until reset or stop.
-Moving gesture holds the result while waiting, then clears it when the next
-movement starts.
-
-In movement modes, missing-hand frames remain in the active capture. A gap
-shorter than the selected Hands missing delay can resume the same gesture; once
-that delay expires, the retained sequence is classified and its result remains
-visible even with no hands.
-Held-pose predictions still clear immediately when no hand is detected.
-Webcam accuracy and automatic boundaries must be evaluated separately from the
-prepared test split; physical camera interaction has not been manually verified
-by the agent. Capture changes do not repair the saved greetings checkpoint's
-[normalization issue](docs/diagnostics/greetings-vs-colors.md).
-
-Camera API and timestamp conventions follow
-[browser camera requirements](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia)
-and [MediaPipe's Python hand-landmark guide](https://developers.google.com/edge/mediapipe/solutions/vision/hand_landmarker/python).
-
-Under **Datasets → Prepare a dataset → Source selection**, select **Choose source
-folders** and check any folders to include beneath each gesture (S1, S2, S3, S4,
-PUB, or other names found in that category). Enable **Videos only** to exclude
-images and landmark arrays. The preview updates counts per gesture; gestures
-with no matching files are omitted when a filter is active. All source folders
-and supported file types remain the default. Selected subfolders are searched
-recursively; files directly inside a gesture are included only in All source
-folders mode. Selection leaves original files untouched and is recorded in
-preprocessing settings, plus the extraction report for raw media. A Group CSV must cover exactly the
-selected supported sources; folder selection itself does not assign signer or
-session groups. Choose a fresh dataset name for this preparation.
-
-The equivalent CLI options can be repeated for any folder names:
+The desktop window uses Microsoft Edge WebView2. If it cannot open, install or
+repair the WebView2 Runtime, or use browser mode:
 
 ```powershell
-python categories.py prepare --category colors --dataset-name selected_sources --source-folder S1 --source-folder S2 --source-folder S3 --videos-only
+.\.venv\Scripts\python.exe dashboard.py --browser
 ```
 
-Dashboard checks (no ML dependencies needed):
-`python -m unittest discover -s tests/dashboard -v` and
-`node --test tests/dashboard/ui.test.cjs`.
+Open **http://localhost:8090**. Pass `--port 8091` if the default port is occupied.
+Browser mode does not need the desktop dependency. Browsing saved results does
+not require TensorFlow; preparation, training, and prediction use the dependencies
+in the **same Python environment that starts the dashboard**.
 
-## Categories: one model for each
+Use **Datasets** to prepare and validate a dataset, **Training** to train it,
+**Model runs** to review results, and **Try a prediction** to test a file or camera.
+Add original files through your file manager, then refresh the source library.
 
-Put raw images, videos or normalized .npy landmarks under data/<category>/<gesture>/. Nested folders within a gesture are supported for raw-media preparation.
+### Prepare, train, and predict from the CLI
+
+Add your recordings using the layout below, then run:
+
+```powershell
+.\.venv\Scripts\python.exe categories.py list
+.\.venv\Scripts\python.exe categories.py prepare --category alphabet --dataset-name my_dataset_v1
+.\.venv\Scripts\python.exe trainer.py inspect --dataset datasets_augmented/alphabet/my_dataset_v1
+.\.venv\Scripts\python.exe categories.py train --category alphabet --dataset-name my_dataset_v1 --run my_run_v1
+.\.venv\Scripts\python.exe trainer.py predict --run runs/alphabet/my_run_v1 --sample "data/alphabet/A/photo001.jpg"
+```
+
+Replace the sample path with an actual file. Choose unused dataset and run names:
+existing outputs, including partial outputs from cancelled jobs, are protected
+from overwrite. You can also select an included checkpoint without retraining.
+
+To prepare and train every populated category sequentially:
+
+```powershell
+.\.venv\Scripts\python.exe categories.py prepare --all --dataset-name all_v1
+.\.venv\Scripts\python.exe categories.py train --all --dataset-name all_v1 --run all_v1
+```
+
+Repeat `--category` to select several categories. With `--all`, empty categories
+are skipped and reported; explicitly selecting an empty category fails.
+Failed category jobs are reported while other selected jobs continue, and
+successful outputs are kept.
+
+## Source data
+
+Organize originals by category, then gesture label. Nested folders beneath each
+gesture are supported:
 
 ```text
 data/
   alphabet/
-    A/image001.jpg
-    B/image001.png
-    J/video001.mp4
+    A/
+      photo001.jpg
+      S1/photo002.jpg
+    B/photo001.png
+    J/clip001.mp4
+  colors/
+    blue/S1/clip001.mp4
+    red/S2/clip001.mp4
   numbers/
     1/sample001.npy
     2/sample001.npy
-  shapes/
-  colors/
-  greetings/
   family/
+  greetings/
+  shapes/
 ```
 
-The six named category folders are created. Add the remaining categories as new folders when their names are known; the code supports any number, including eight. Inside each category create folders for the actual gesture labels. For example, alphabet is the model category, and A/B/J are its classes.
+The named categories are starting folders; add others as needed. Each category
+needs at least **two classes** and **three independent source groups per class**
+after unusable files are rejected. These are processing minimums, not evidence
+of recognition quality. Use recordings of real movement for dynamic signs.
 
-Preparation automatically extracts landmarks from JPG/PNG images and MP4 videos (other supported formats below). Each category needs at least two gesture classes and at least three independent source groups per class.
+Supported inputs:
 
-## Quick start
+- **Images:** `.jpg`, `.jpeg`, `.png`, `.bmp`, `.webp`, `.tif`, `.tiff`.
+- **Videos:** `.mp4`, `.avi`, `.mov`, `.mkv`, `.webm`, `.m4v`, subject to the decoder.
+- **Landmarks:** `.npy` arrays following the contract below.
 
-Open a terminal in this folder. Verified with Python 3.12 on Windows CPU; requirements.txt pins the tested versions.
+Extensions are case-insensitive. Animated/multipage images are rejected; convert
+them to video. Unsupported files, including `.npz`, are reported as ignored.
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe categories.py list
-.\.venv\Scripts\python.exe categories.py prepare --category alphabet --dataset-name prepared_v1
-.\.venv\Scripts\python.exe categories.py train --category alphabet --dataset-name prepared_v1 --run first
-.\.venv\Scripts\python.exe trainer.py predict --run runs\alphabet\first --sample data\alphabet\A\image001.jpg
-```
+### Raw image and video extraction
 
-To prepare and train every populated category:
+MediaPipe HandLandmarker extracts up to two hands locally. The shared detector is
+`models/hand_landmarker.task`; if absent, it downloads automatically on first use.
+Use `--hand-model PATH` for a custom compatible detector. Detection/presence
+confidence defaults to 0.5 and is configurable with `--detection-confidence`.
 
-```powershell
-.\.venv\Scripts\python.exe categories.py prepare --all --dataset-name prepared_v1
-.\.venv\Scripts\python.exe categories.py train --all --dataset-name prepared_v1 --run first
-```
+Images honor EXIF orientation and produce one landmark frame. Videos decode
+every frame in a fresh tracking session before full-sequence resampling.
+Use constant-frame-rate recordings: timing uses frame index and reported FPS.
+Unreadable/truncated clips, invalid FPS, and videos with fewer than two decodable
+frames are rejected.
 
-Repeat --category to select several, for example --category alphabet --category numbers. --all skips empty categories and reports them. Explicitly selecting an empty category returns an error. A failed category is reported while other selected jobs continue; retry failed categories explicitly after fixing their data.
+Left/right slots follow detected handedness; if both detections claim one slot,
+the highest-confidence detection wins. `--swap-hands` reverses slots without
+flipping pixels. Keep mirroring consistent between training and inference.
+Missing slots have zero coordinates and zero presence flags. Sources with no
+detected hand are rejected; partly detected clips retain missing-hand frames
+and report detection coverage.
 
-Each category starts a fresh model in a separate process, using the same Conv1D–BiLSTM architecture with an output size determined by that category's gesture classes. Models run sequentially.
+Identical extracted arrays within a class are deduplicated; conflicting labels
+for identical arrays fail preparation. Roboflow filename variants are grouped
+by a filename heuristic. Use explicit signer/session groups for relationships
+that filenames cannot establish.
 
-Outputs are separate:
+### Pre-extracted landmark contract
+
+Each `.npy` file represents one original image or recording and contains a real,
+finite numeric array:
+
+| Field | Contract |
+|---|---|
+| Static source | Shape `(128,)` or `(1,128)`. |
+| Recording | Shape `(T,128)` with `T >= 2`. |
+| Columns 0–62 | Left-hand landmarks 0–20, flattened as `x0,y0,z0,…,x20,y20,z20`. |
+| Columns 63–125 | Right-hand landmarks in the same order. |
+| Columns 126–127 | Left/right presence flags, each exactly 0 or 1. |
+| Absent hand | All 63 coordinates for its slot must be zero. |
+
+The upstream extractor must use consistent normalization and hand identity.
+Entirely empty arrays, nonfinite values, and incompatible shapes are rejected;
+presence is never guessed from coordinates. Z may be negative.
+
+For legacy mixed raw-media/`.npy` datasets, supplied arrays must use MediaPipe
+image-normalized coordinates: X relative to width, Y relative to height, and Z
+at approximately the X scale. Hand-relative preparation needs original frame
+dimensions and **cannot accept or mix supplied `.npy` sources**. Normalized
+`.npy` prediction inputs must already follow the run's saved feature convention.
+
+## Dataset preparation
+
+Prepared versions are saved under:
 
 ```text
-datasets_augmented/alphabet/prepared_v1/{train,validation,test}/<gesture>/*.npy
-datasets_augmented/numbers/prepared_v1/{train,validation,test}/<gesture>/*.npy
-runs/alphabet/first/best.keras
-runs/alphabet/first/classes.json
-runs/alphabet/first/test_metrics.json
-runs/numbers/first/best.keras
-runs/numbers/first/classes.json
-runs/numbers/first/test_metrics.json
+datasets_augmented/<category>/<dataset name>/
+  train/<gesture>/*.npy
+  validation/<gesture>/*.npy
+  test/<gesture>/*.npy
+  manifest.json
+  preprocessing.json
+  augmentation_summary.json
 ```
 
-Other training artifacts are stored alongside each model. Prediction uses the chosen category's run directory; there is no automatic category classifier. Category defaults resolve relative to the repository root, so commands work from another working directory when you pass the script's full path.
+Category preparation defaults to `prepared_v1`. Select `--dataset-name` when
+training; it can be inferred only when exactly one dataset exists. Legacy
+category-level datasets remain selectable as **Original dataset**, or with
+`--dataset-name .`.
 
-Existing outputs are protected. Use a new --run name for retraining (omitting it generates a timestamp). To prepare another dataset version, use a new `--dataset-name` on category prepare and select that name on category train. Preparation defaults to `prepared_v1` beneath `datasets_augmented/<category>/`. Training can infer the dataset only when exactly one exists; otherwise specify `--dataset-name`. Use `--dataset-name .` to train an original category-level dataset. The `--datasets` option still changes the dataset root, while `--data` and `--runs` change source and model roots.
+CLI roots can be changed with `--data`, `--datasets`, and `--runs` where applicable.
+Category defaults resolve relative to the repository. Dashboard source/dataset
+roots are configurable under **Datasets → Project folders → Scan folders**;
+dashboard paths must remain inside the project.
 
-Category preparation supports --static-variants 8, --validation 0.15, --test 0.15 and --seed 42. Automatic jitter is 0.03 for hand-relative features and 0.0075 for the original feature convention. For signer/session groups, pass --groups-dir groups with groups/alphabet.csv, groups/numbers.csv, etc. CSV paths are relative to each category, for example A/image001.npy. Each model's split is independent; cross-category signer separation is not imposed.
+### Splits, grouping, and validation
 
-Training supports --epochs 100, --batch-size 32, --learning-rate 0.001, --patience 12, --seed 42 and --class-weights. Run each command with --help for options.
+Default targets are **70% training / 15% validation / 15% test**, assigned to
+independent source groups before generating variants. Rounding and group sizes
+can change the exact proportions. All siblings retain their source identity
+and stay in one split. Every class must appear in all three splits.
 
-The original trainer.py prepare/train/inspect commands remain available for one dataset. In the lower-level examples below, raw means one category's source folder, such as data/alphabet.
-
-## Raw image and video preparation
-
-The existing prepare commands now detect and process raw media automatically. Install the updated requirements in the Python environment you use for preparation:
-
-```powershell
-python -m pip install -r requirements.txt
-python categories.py prepare --category alphabet
-python categories.py train --category alphabet --run first
-```
-
-Supported images: .jpg, .jpeg, .png, .bmp, .webp, .tif, .tiff. Supported videos: .mp4, .avi, .mov, .mkv, .webm, .m4v, subject to the installed decoder. Extension matching is case-insensitive. Animated/multipage images are rejected; convert them to video. Other files (including .npz) are listed as ignored in extraction_report.json.
-
-MediaPipe HandLandmarker extracts up to two hands. The official model downloads automatically once into models/hand_landmarker.task; subsequent use is local. You may supply --hand-model PATH for a custom compatible .task asset. Raw media is processed on your machine and is never uploaded.
-
-Images are decoded with EXIF orientation applied and produce one (1,128) vector. Videos use a fresh tracking session per clip, decode every frame, and produce (T,128) before the existing 32-frame interpolation. Supply constant-frame-rate videos: the timeline uses frame index and reported FPS. Unreadable/truncated videos and invalid FPS are rejected. A video with fewer than two decodable frames is rejected rather than treated as a static image.
-
-Coordinates use MediaPipe's image-normalized landmarks: X relative to image width, Y relative to height, and wrist-relative Z at approximately the X scale. There is no extra centering or hand-size scaling, preserving XY trajectory and relative placement. Returned Left/Right labels determine the slots, independent of detection order. If the detector reports the same handedness twice, only the highest-confidence detection fills that slot. Handedness is estimated and can be wrong; keep image mirroring consistent across training and inference. --swap-hands reverses reported slots consistently without flipping pixels.
-
-Detection and presence confidence default to 0.5; change with --detection-confidence (0 to 1). Missing hands have zero coordinates and binary zero flags. Images with no detected hand, and videos with no hand in any frame, are rejected and reported. Partly detected videos retain all decoded frames and expose detected_frames in the report.
-
-With original image coordinates, static images generate 8 Gaussian-jitter variants by default in every split. With hand-relative features, training keeps an original plus variants while validation/test keep clean originals, as described above. Videos interpolate to 32 frames and every sample remains (32,128). All synthetic siblings share the original raw path as variant_of. Roboflow filenames sharing a stem before .rf. are grouped; common names such as name_jpg.rf.HASH.jpg are also grouped with name.jpg. This is a filename heuristic: use --groups-dir CSVs for other known source/signer relationships. CSV paths now refer to original raw filenames, not temporary arrays.
-
-Identical extracted arrays within the same class are deduplicated and reported as rejected duplicates. Identical arrays with conflicting class labels fail preparation. After rejections, all classes still need at least three independent groups. If this fails, a timestamped extraction-failed report is saved beside the requested output directory.
-
-Successful datasets additionally contain:
-
-- extraction_report.json: accepted/rejected/ignored sources and video detection coverage.
-- extracted/<class>/<id>.npy: original-length extracted arrays, before interpolation/jitter.
-- extracted_sources.json: mapping from those IDs back to original raw paths.
-- preprocessing.json: extraction settings, model checksum and MediaPipe version for reproducibility.
-
-Prediction accepts an image, video or .npy sample. For raw media it uses saved extraction settings, verifies the landmark model checksum, and repeats a single image without random jitter at inference. If a custom .task asset was used, pass the same asset with --hand-model. Models trained only from pre-extracted .npy inputs still require .npy prediction input because their upstream normalization cannot be inferred.
-
-Implementation reference: [MediaPipe Hand Landmarker Python guide](https://developers.google.com/edge/mediapipe/solutions/vision/hand_landmarker/python).
-
-## Pre-extracted .npy input contract
-
-Place one original extracted recording/image in each .npy file:
-
-```text
-raw/
-  A/
-    image001.npy
-    image002.npy
-    image003.npy
-  J/
-    video001.npy
-    video002.npy
-    video003.npy
-```
-
-Class names are arbitrary folder names. Each file contains a real, finite numeric array:
-
-- Video/recording: (T, 128), with T >= 2.
-- Static image: (128,) or (1, 128). A single frame identifies a static source.
-- Columns 0–62: left-hand landmarks 0–20, flattened as x0,y0,z0,x1,y1,z1,...,x20,y20,z20.
-- Columns 63–125: right-hand landmarks in the same order.
-- Column 126: left-present flag. Column 127: right-present flag.
-- Flags must be exactly 0 or 1. All 63 coordinates of an absent slot must be zero.
-
-For supplied .npy files, the upstream extractor must normalize coordinates consistently and maintain left/right slot identity across time. The .npy loader does not guess normalization, handedness, or presence from zero coordinates. If mixing raw media and .npy in one category, supplied arrays must use the MediaPipe coordinate convention above. Use the same extraction convention at inference. Z may be negative; valid coordinates are not clipped to [0,1]. Entirely empty samples, nonfinite values and incompatible shapes are rejected.
-
-The feature calculation is 2 × 21 × 3 + 2 = 128. The per-hand sequence is (32,21,3), flattened into the combined (32,128) array.
-
-## Uniform video resampling
-
-Every recording maps to 32 equally spaced points between its first and last frame. Each coordinate uses linear interpolation, preserving endpoints. There is no frame-count-based dropping/repetition for videos. Binary presence flags use nearest-neighbor selection rather than fractional interpolation; output coordinates of absent hand slots are zeroed.
-
-When detection changes between present and absent, coordinate interpolation spans the zero-filled absent frame. This convention is explicit and consistent; it cannot recover a hand missed by the upstream detector. The input format assumes uniformly sampled frames because it contains no timestamps.
-
-## Static-image repeat + jitter
-
-Under the original image-coordinate convention, each static image generates **8 variants** by default, in whichever split its source belongs to. Each variant repeats the 128-value source vector for 32 timesteps and adds independent Gaussian noise to every present-hand coordinate at each timestep. The new alphabet convention uses the training-only rules described in **Alphabet landmark preprocessing** above.
-
-Original image-coordinate jitter settings:
-
-- Mean: 0.
-- Default standard deviation: **0.0075**, or 0.75% of a unit normalized coordinate scale.
-- Suggested requested range: 0.005–0.01 (0.5–1%).
-- Presence flags and all absent-hand coordinates remain unchanged.
-- No rotation, scaling, translation transform, temporal smoothing or coordinate clipping.
-- Random results are reproducible with the same source files, options and seed.
-
-Example: prepare --source raw --output dataset --static-variants 8 --jitter 0.005
-
-Each manifest row includes a shared **variant_of** source ID. Splitting occurs before synthesis, so every sibling remains in the same train/validation/test split. Static images are never interpreted as a particular class name; A, J, Z or any other label follows the same source-shape rules.
-
-Noise prevents literally identical timesteps, but does not create real motion or guarantee that a model cannot distinguish synthetic and real sequences.
-
-## Splits and provenance
-
-Default split targets are 70% train / 15% validation / 15% test, based on independent source groups before synthesis. Integer rounding and group sizes can change the exact proportions. At least three independent groups per class and at least two classes are required. Eight variants from one image still count as one independent source.
-
-By default each original file is a group. If several recordings share a signer or session, supply a CSV so related recordings stay together across all classes:
+Give related recordings a shared signer/session/recording group ID so those
+sources stay together across classes:
 
 ```csv
 path,group
-A/image001.npy,signer01
-J/video001.npy,signer01
-A/image002.npy,signer02
-J/video002.npy,signer02
-A/image003.npy,signer03
-J/video003.npy,signer03
+A/photo001.jpg,signer01
+B/photo001.jpg,signer01
+A/photo002.jpg,signer02
+B/photo002.jpg,signer02
+A/photo003.jpg,signer03
+B/photo003.jpg,signer03
 ```
 
-Use: prepare --source raw --output dataset --groups groups.csv
+Save a complete CSV at `groups/alphabet.csv`, with paths relative to
+`data/alphabet`, and prepare with `--groups-dir groups`. Each selected supported
+source must appear exactly once with a nonempty group ID. Splits are independent
+per category; cross-category signer separation is not imposed. A constrained
+group assignment fails instead of permitting leakage.
 
-The CSV must cover every source file exactly once with a nonempty group ID. Group splitting requires every class in every split and fails rather than allowing leakage. For shared groups spanning classes, a seeded search chooses a balanced feasible assignment; unusually constrained datasets may require more groups or different fractions.
+The lower-level command accepts one category's source directory:
 
-In .npy-only preparation, byte-identical numeric source arrays are rejected as duplicates. File-level grouping cannot identify visually similar images or clips from the same recording; use group IDs for known relationships. Feed original source arrays to prepare, not pre-generated synthetic variants.
-
-Prepared output:
-
-```text
-dataset/
-  train/<class>/<sample>.npy
-  validation/<class>/<sample>.npy
-  test/<class>/<sample>.npy
-  manifest.json
-  preprocessing.json
+```powershell
+.\.venv\Scripts\python.exe trainer.py prepare --source data/alphabet --output datasets_augmented/alphabet/grouped_v1 --groups groups/alphabet.csv --normalization hand-relative-sequence-v1
 ```
 
-All prepared samples are float32 (32,128). Inspection validates shape, values, manifest coverage, class coverage and disjoint group/source/variant_of IDs.
+`trainer.py inspect --dataset PATH` validates shapes, values, manifest/class
+coverage, and disjoint group/source/variant identities. Review
+`extraction_report.json` for raw-media rejections. Successful preparation also
+retains original-length arrays in `extracted/`, mappings in
+`extracted_sources.json`, and detector settings/checksums in `preprocessing.json`.
+Failed extraction can write a timestamped
+`<dataset name>.extraction-failed-….json` beside the output folder.
 
-## Architecture
+Preparation reports stage names and elapsed time every 10 seconds, plus counts
+where available. Completion is printed after validation and cleanup.
 
-Matches the supplied image, in order:
+### Source-folder filtering
+
+Under **Source selection**, choose folders such as S1/S2/S3 and optionally enable
+**Videos only**. Preview counts update per gesture; gestures with no matching
+files are omitted when filtering is active.
+
+```powershell
+.\.venv\Scripts\python.exe categories.py prepare --category colors --dataset-name selected_v1 --source-folder S1 --source-folder S2 --videos-only
+```
+
+Selected immediate gesture subfolders are searched recursively. Files directly
+inside a gesture are included only with All source folders. Selection is recorded
+in metadata, leaves originals untouched, and does not assign signer groups.
+
+### Landmark preprocessing and static augmentation
+
+New raw-media alphabet datasets prepared through FSL Studio or `categories.py`
+default to **`hand-relative-sequence-v1`**. Other categories and supplied-landmark
+datasets retain image coordinates. The lower-level `trainer.py prepare` defaults
+to image coordinates; select hand-relative features explicitly as shown above.
+
+| Profile | Static training samples | Static validation/test samples |
+|---|---|---|
+| Hand-relative | One clean original plus the remaining requested variants: ±15° rotation, 50% mirroring with hand-slot swaps, and jitter of 0.03 palm lengths by default. | One clean sequence per accepted source. |
+| Original image coordinates | Eight repeat-and-jitter variants by default, with jitter standard deviation 0.0075 image units. | The same requested repeat-and-jitter variants in the source's assigned split. |
+
+`--static-variants` defaults to 8. Leave dashboard Jitter empty for the profile's
+default, or set `--jitter` in that profile's units. Static poses repeat for
+32 timesteps; noise affects only present-hand coordinates. Legacy image-coordinate
+augmentation uses independent Gaussian noise without rotation or mirroring.
+
+Hand-relative features convert XYZ to pixel units using width/height, center
+landmarks 1–20 on the wrist, and scale them by each frame's pixel palm length
+(wrist to middle-finger knuckle). Landmark 0 carries displacement from the first
+valid wrist position, divided by the sequence's median pixel palm length.
+This preserves J/Z trajectories while reducing sensitivity to size, placement,
+and aspect ratio; it cannot correct perspective or missed detections.
+
+Use `--normalization image` or **Original image coordinates** to reproduce older
+alphabet preparation. Existing datasets/checkpoints are not converted: prepare
+and train fresh versions. Saved metadata selects preprocessing for raw-file,
+desktop-camera, and exported browser inference.
+
+### Video and sequence augmentation
+
+Optional timing augmentation adds sequences for **training videos and multi-frame
+`.npy` sources**. It is disabled by default:
+
+```powershell
+.\.venv\Scripts\python.exe categories.py prepare --category alphabet --dataset-name timing_v1 --video-extra-samples 3 --video-time-warp 0.05
+```
+
+`--video-extra-samples` accepts 0–1000 extras per eligible source; zero disables
+it. `--video-time-warp` accepts values greater than zero through 0.10 and defaults
+to 0.05, allowing shifts up to 5% of the normalized clip timeline. It preserves
+endpoints, movement order, labels, and groups. Validation/test videos keep their
+original samples, and no modified video files are generated.
+
+Motionless or sparsely detected sources can yield fewer distinct extras.
+`video_augmentation_report.json` records requests, actual counts, skips, and
+shortfalls. The manifest stores time maps; training copies the report into the
+run. See the [augmentation design](docs/design/video-augmentation.md) and
+[augmentation workspace guide](augmentation/README.md).
+
+All prepared samples are `float32` with shape `(32,128)`. Video coordinates use
+uniform linear interpolation over the full recording, preserving endpoints;
+presence flags use nearest-neighbor sampling and absent slots are zeroed.
+Interpolation cannot recover missed hands. Inference applies ordinary
+preprocessing without stochastic augmentation.
+
+## Training and evaluation
+
+Each category builds a fresh model in a separate process. Training defaults are
+100 epochs, batch size 32, Adam learning rate 0.001, early-stopping patience 12,
+and seed 42. Optional `--class-weights` uses training counts only.
+
+Early stopping, learning-rate reduction, and best-checkpoint selection use
+validation loss. Held-out test evaluation loads the best saved model. Labels
+are saved in stable alphabetical order.
+
+### Architecture
 
 | Layer | Configuration |
 |---|---|
-| Input | 32 × 128 |
-| Conv1D | 64 filters, kernel 3 |
-| Batch normalization | momentum 0.99, epsilon 0.0001 |
-| MaxPooling1D | pool size 2 |
+| Input | `32 × 128` |
+| Conv1D | 64 filters, kernel 3, same padding, ReLU |
+| Batch normalization | Momentum 0.99, epsilon 0.0001 |
+| MaxPooling1D | Pool size 2 |
 | Dropout | 0.3 |
-| Conv1D | 128 filters, kernel 3 |
-| Batch normalization | momentum 0.99, epsilon 0.0001 |
+| Conv1D | 128 filters, kernel 3, same padding, ReLU |
+| Batch normalization | Momentum 0.99, epsilon 0.0001 |
 | Dropout | 0.3 |
-| Bidirectional LSTM | 128 units per direction, return_sequences=True |
+| Bidirectional LSTM | 128 units per direction, returns sequences |
 | Dropout | 0.3 |
-| Bidirectional LSTM | 64 units per direction, return_sequences=False |
+| Bidirectional LSTM | 64 units per direction |
 | Dropout | 0.3 |
-| Dense | 64 units |
-| Output | one probability per gesture class |
+| Dense | 64 units, ReLU |
+| Output | One softmax probability per gesture class |
 
-Settings not specified in the image: ReLU for Conv1D and hidden Dense, same convolution padding, default LSTM tanh/sigmoid activations, softmax output, Adam optimizer, sparse categorical cross-entropy. The model has 485,888 + 65 × number_of_classes parameters, including batch-normalization state.
+The model uses sparse categorical cross-entropy and has
+`485,888 + 65 × number_of_classes` parameters, including batch-normalization state.
 
-TensorFlow references: [Conv1D](https://www.tensorflow.org/api_docs/python/tf/keras/layers/Conv1D), [BatchNormalization](https://www.tensorflow.org/api_docs/python/tf/keras/layers/BatchNormalization), [recurrent layers](https://www.tensorflow.org/guide/keras/working_with_rnns).
+### Packed loading and checkpoint continuation
 
-## Training, evaluation and export
+The default `--loader packed` validates and consolidates prepared samples into
+`<dataset>/_training_cache/<fingerprint>/`, then reads pre-batched memory-mapped
+arrays with one prefetched batch. It preserves features, labels, and splits
+without repeating extraction or augmentation. Completed caches are reused when
+manifest/preprocessing and source filename/size/modification metadata match.
+Keep datasets immutable during training; old caches remain on disk.
+Use `--loader files` to read individual samples instead.
 
-By default the tf.data pipeline reads pre-batched data from consolidated memory-mapped arrays, shuffles training sample indices only, and prefetches one batch. The manifest determines a stable alphabetical class-to-index mapping saved as classes.json.
-
-Early stopping, learning-rate reduction and best-model selection use validation loss only. The held-out test split is evaluated after loading the best saved checkpoint. Optional --class-weights computes inverse-frequency weights using training counts only.
-
-Each run contains:
-
-- best.keras: the selected model, usable with tf.keras.models.load_model.
-- classes.json: class names in output-index order.
-- preprocessing.json: input layout, resampling and synthesis settings.
-- training_config.json and split_manifest.json: settings, framework version and exact sample provenance.
-- model_summary.txt: layer shapes and parameter counts.
-- history.csv and history.json: per-epoch metrics.
-- test_metrics.json: test loss, accuracy, macro F1, per-class precision/recall/F1/support and confusion matrix.
-- test_predictions.csv: sample path, true label, predicted label and confidence.
-
-Keep best.keras, classes.json and preprocessing.json together. The predict command accepts one normalized source array, resamples it to (32,128), and prints all class probabilities. A single-frame prediction is repeated without stochastic augmentation for deterministic inference.
-
-Test metrics are per sequence; synthetic siblings are correlated, not independent new observations. Classes with more static variants contribute more sequences to aggregate accuracy. Use macro F1 and collect independent real recordings to judge real-world performance. No gesture-recognition accuracy is claimed from generated test fixtures.
-
-## Tests
-
-Run `python -m unittest discover -v` to include both trainer and category tests. Category tests check discovery, separate output paths, empty/unknown categories, overwrite protection, and failure reporting.
-
-The suite checks interpolation on shorter/longer recordings, binary presence and missing-hand invariants, independent Gaussian noise scale, reproducibility, group splitting, repeat+jitter preparation with 8 siblings, leakage detection, invalid input and confusion-matrix calculations.
-
-With TensorFlow installed it also checks architecture parameters, runs a training batch, and verifies a saved/reloaded model gives matching predictions. Without TensorFlow that test is explicitly skipped; preprocessing remains usable with NumPy alone.
-
-## Preparation progress messages
-
-Long preparation stages report their name and elapsed time every 10 seconds, with counts and percentages when available. Messages cover source checking, splitting, sequence generation, validation, copying extracted landmarks, and cleanup. Preparation complete is printed only after final validation and cleanup finish. Progress goes to stderr and is flushed immediately.
-
-
-## Optimized training loader
-
-The default --loader packed validates and consolidates existing sequences once into dataset/_training_cache/<fingerprint>/, with one X and y array per split. Packing happens without rerunning raw extraction or generating new jitter variants. Every feature value, label, class order and split is preserved.
-
-Subsequent epochs open two consolidated arrays per split and read whole batches through memory mapping. This avoids per-sample np.load calls and validation during every epoch. A small index permutation shuffles training examples, and only one batch is prefetched, avoiding the previous 10,000-sequence shuffle buffer. The training architecture, batch-size default, number of samples and optimization objective are unchanged; exact random ordering can differ.
-
-The first run prints packing and validation progress. Later runs scan source filenames, sizes and modification times and reuse the completed cache. Manifest or preprocessing changes also invalidate it. Keep datasets immutable during training. This is metadata-based invalidation, not a cryptographic rehash of every source array on every run. A changed dataset gets a new cache directory; old caches are retained. The 80,768-sequence dataset needs roughly 1.32 GB of extra disk space per complete cache.
-
-To continue your cancelled alphabet checkpoint with the optimized loader:
+Continue a checkpoint using the same dataset and a **new output run**:
 
 ```powershell
-python categories.py train --category alphabet --run optimized --resume-from runs\alphabet\first\best.keras
+.\.venv\Scripts\python.exe categories.py train --category alphabet --dataset-name my_dataset_v1 --run my_run_resumed --resume-from runs/alphabet/my_run_v1/best.keras --epochs 20
 ```
 
-Choose a new --run name if optimized already exists. Without --resume-from, training starts a new model. A continuation restores saved weights and optimizer state, checks model architecture/class order/preprocessing, and restarts early-stopping counters. --epochs counts additional epochs in the new run; it is not an exact interrupted-step resume. The existing first run is retained.
+Continuation restores weights and optimizer state, checks class order,
+architecture, and exact preprocessing metadata, and restarts early-stopping
+counters. `--epochs` counts additional epochs; it does not resume an interrupted
+step exactly. Select one category when resuming. Changing preprocessing or
+augmentation settings requires a fresh model.
 
-Each epoch prints measured duration including validation, plus an approximate remaining time if all requested epochs run. Durations are saved in epoch_times.json; this projection can change with laptop load, caching and early stopping. actual_optimizer_learning_rate in training_config.json records the loaded optimizer's current rate when continuing.
+Epoch durations, including validation, are saved in `epoch_times.json` and shown
+with an approximate remaining time. The loaded optimizer's learning rate is
+recorded in `training_config.json`.
 
-Use --loader files only to return to the original per-file path. Packed loading removes avoidable loading overhead, but CPU computation still depends on the full specified Conv1D–BiLSTM workload. No full-dataset speedup or GPU acceleration is claimed from the fixture tests.
+### Saved run artifacts
 
-## FSL Pocket PWA sample
+Runs live in `runs/<category>/<run name>/`:
 
-See [pwa-sample/README.md](pwa-sample/README.md) for the client-side category downloader and camera recognition demo. After dependency setup, start it with `npm start` inside `pwa-sample`. Trained checkpoints and existing browser exports are included. Export additional runs with `pwa-sample/tools/export_model.py`.
+| Artifact | Contents |
+|---|---|
+| `best.keras` | Best validation checkpoint, loadable with Keras. |
+| `classes.json`, `preprocessing.json` | Label order and input/extraction convention. |
+| `training_config.json`, `split_manifest.json` | Training settings, framework version, and sample provenance. |
+| `model_summary.txt` | Layer shapes and parameter counts. |
+| `history.csv`, `history.json`, `epoch_times.json` | Learning curves and durations. |
+| `test_metrics.json` | Loss, accuracy, macro precision/recall/F1, lowest sign recall, per-class scores/support, and confusion matrix. |
+| `test_predictions.csv` | Per-sample true/predicted labels and confidence. |
+| `confusion_matrix*.png`, `confusion_matrix*.csv` | Counts and percentages within each actual class. |
+| `benchmark.json`, `benchmark.csv` | Benchmark checks and available timing evidence. |
+| `camera_timing.json` | HUDYAT timing sessions, once camera measurements are saved. |
 
+Keep **`best.keras`, `classes.json`, and `preprocessing.json` together**.
+Raw-file prediction verifies saved detector settings/checksums; use `--hand-model`
+for the same custom asset used in training. Runs trained only from supplied
+landmarks require compatible `.npy` predictions.
 
-## Confusion matrices
-After test evaluation, every training run saves `confusion_matrix.png` (counts), `confusion_matrix_normalized.png` (percentages within each actual class), and matching CSV files. Rows are actual classes; columns are predictions. The diagonal contains correct predictions. Blank cells contain zero samples. These results describe the prepared test split, not live webcam accuracy.
-
-Install the updated plotting dependency with `python -m pip install -r requirements.txt` in your training environment. Training commands are unchanged.
-
-For a completed run, generate the plots without retraining:
+Confusion-matrix rows are actual labels and columns are predictions.
+Regenerate plots without retraining:
 
 ```powershell
-python confusion_matrix.py --run runs/alphabet/optimized
+.\.venv\Scripts\python.exe confusion_matrix.py --run runs/alphabet/my_run_v1
 ```
 
-## Video and sequence augmentation
+Prepared test scores describe that split. Synthetic siblings are correlated;
+independent recordings and live trials are needed to assess webcam performance.
 
-Preparation can create extra timing variations from videos and pre-extracted
-multi-frame `.npy` landmarks. It is disabled by default. Enable it with:
+## Live camera prediction
+
+Select a run under **Try a prediction**, then start the camera. The local Python
+worker loads the checkpoint once and follows its saved extraction/preprocessing
+settings. Camera inference requires raw-media metadata; runs without it can still
+predict compatible landmark files.
+
+| Mode | Behavior |
+|---|---|
+| **Perform once** | Captures one complete movement, then holds the result until **Next gesture**. |
+| **Moving gesture** | Captures movements continuously; holds each result until the next movement starts. |
+| **Held pose** | Classifies the current pose, repeated to 32 frames; clears when no hand is detected. |
+
+Use Held pose for static letters and a movement mode to evaluate J/Z with a model
+trained on appropriate movement examples. No inference augmentation is applied.
+Scores below 60% display uncertainty.
+
+Recognition timing stays editable during capture:
+
+| Control | Default | Range |
+|---|---|---|
+| Stillness delay | 600 ms | 100–2,000 ms |
+| Hands missing delay | 400 ms | 100–2,000 ms |
+| Frame interval | 50 ms | 20–500 ms |
+
+Changes apply on the next frame without reloading the worker/model. Finish delays
+apply to movement modes; frame interval applies to every mode. Actual frequency
+depends on processing speed. Settings survive camera stops/starts within the
+page and can be saved with model records.
+
+Movement capture retains up to 600 ms before onset and resamples the full interval
+to 32 frames. Brief missing-hand gaps remain zero-filled; the selected delay
+finishes capture and holds the result. Initial boundary heuristics require two
+moving frames, 0.04 image units/second, and at least 0.025 accumulated movement.
+Pauses can finish capture early; camera shake can start it. Captures exceeding
+six seconds or 512 frames are rejected. Frame delivery pauses over one second
+reset unfinished captures.
+
+The preview is mirrored; model input is unmirrored. Frames go only to the local
+worker and are not saved. Stop live prediction before other jobs. Leaving the
+prediction view or hiding the tab ends capture; abandoned workers expire after
+60 seconds. See the saved [greetings normalization diagnosis](docs/diagnostics/greetings-vs-colors.md)
+when assessing older checkpoints.
+
+The dashboard binds to loopback and starts one background job at a time.
+Activity history lasts until restart; generated artifacts persist. **Stop job**
+keeps partial outputs. Closing the desktop window stops the server/camera workers
+and asks before stopping an active job. In browser mode, use Ctrl+C in its terminal.
+
+## Model comparison and test records
+
+**Model runs → Model comparison** shows source/dataset metadata, original/prepared
+counts, training/augmentation settings, offline scores, and recorded live settings.
+Filter by category or **Preferred only**, inspect learning curves, and select
+**Try model** to restore a run's recorded mode and sliders.
+
+**Edit record** saves notes, camera settings, trial counts, recognition time,
+date, and device/session, with statuses **Not tested**, **Testing**, **Preferred**,
+or **Rejected**. Each category has one preferred run; selecting another returns
+the previous choice to Testing while keeping notes. **Record current settings**
+saves camera controls without interrupting capture.
+
+After a sample or live prediction, choose **Save as test run** for independent
+tests such as Test 1/Test 2, or enter a custom name. Tests snapshot model details,
+camera settings, observations, and the latest prediction. Trial counts, correct
+counts, and median recognition time are manual observations and stay blank until
+measured. Saving an existing test edits it; choose Save as test run again for
+the next test.
+
+Records persist in `runs/model_records.json`; tests persist in
+`runs/prediction_tests.json`. They reference models without copying checkpoints
+or retraining. **Prediction test runs** supports filtering, editing, JSON downloads,
+and **Try these settings**. **Download record** includes saved configurations,
+dataset metadata, scores, labels, benchmark details, and prediction test history.
+
+## Automated benchmarks
+
+**Model runs → Benchmark metrics** reports accuracy, macro precision/recall/F1,
+lowest sign recall (including ties), response time, and **Met / Not met /
+Incomplete**. Category and Preferred filters also apply to **Download metrics CSV**.
+
+| Check | Requirement |
+|---|---|
+| Accuracy, macro precision, macro recall, macro F1 | Each at least 85%. |
+| Lowest sign recall | At least 70%. |
+| Class count | Alphabet 26, Numbers 10, Colors 6, Greetings 10. |
+| Held-out coverage | Every saved class has test support. |
+| Camera coverage | Every model sign has a measured response; no timeouts. |
+| Response time | Median full HUDYAT camera-to-confirmed-result time strictly below 1,000 ms. |
+
+All saved classes contribute equally to macro averages; zero denominators give
+zero scores. Checks use unrounded values. Any failed check gives Not met;
+otherwise missing evidence gives Incomplete. All checks must pass for Met.
+Categories without a specified required class count remain incomplete.
+Legacy aggregates can be derived from per-class results without rewriting scores.
+
+### HUDYAT camera timing
+
+Choose **HUDYAT camera test** beside a model and supply the checkout path
+(default `../HUDYAT`). Preparation exports the model into
+`exports/hudyat-timing/<session>/` and builds a standalone page from HUDYAT's actual
+recognition, preprocessing, and confirmation sources using its installed
+Vite/React/TensorFlow.js/MediaPipe dependencies. The checkout and database remain
+untouched during this test.
+
+Open the test from **Activity**, start the camera in the target browser, choose
+the expected sign, and begin a trial. Perform every sign, then **Save timing results**.
+Timing starts before extraction on the first submitted frame with a detected
+hand and stops after a confirmed result is rendered and allowed to paint.
+Extraction, preprocessing, capture, inference, confidence/stability gates, and
+rendering are included; loading/downloads and time before that hand frame are excluded.
+
+`camera_timing.json` retains expected/confirmed signs, wrong confirmations,
+15-second timeouts (including trials with no hand detected), response times,
+browser/camera/backend details, and checkpoint/source hashes. Sessions stay
+separate; the latest saved session supplies median/p95 timing. Downloads include
+these camera reports.
+
+The current HUDYAT flow requires at least **1.2 seconds of stable alphabet estimates**
+or **two-second clips for other categories**, so that flow cannot meet the
+sub-second requirement from the first hand frame. The trainer records that
+outcome using HUDYAT's existing rules. Evaluate deployment integration separately
+if it changes the measured recognition flow.
+
+### Local inference diagnostic
+
+New training runs also time local inference. Use **Measure local inference**, or
+run this while the saved dataset/test files remain available:
 
 ```powershell
-python categories.py prepare --category alphabet --dataset-name video_v1 --video-extra-samples 3 --video-time-warp 0.05
-python trainer.py inspect --dataset datasets_augmented/alphabet/video_v1
-python categories.py train --category alphabet --dataset-name video_v1 --run video_augmented_v1
+.\.venv\Scripts\python.exe trainer.py benchmark --run runs/alphabet/my_run_v1
 ```
 
-`--video-extra-samples` accepts integers 0–1000; zero disables the feature.
-Three requests up to three extras per eligible training source, alongside the
-original sample. Validation/test videos and existing static-image augmentation
-keep their current behavior. All descendants remain in their source group's
-split and retain their gesture label.
+This measures 30 single-sequence predictions after three warmups, using up to
+30 evenly spaced held-out samples. Output transfer and label selection are
+included; camera processing and confirmation are excluded. It is a diagnostic
+and does not substitute for the camera response benchmark.
 
-`--video-time-warp` defaults to 0.05 and accepts finite values greater than
-zero through 0.10. It bounds the timing shift to 5% of the normalized clip
-timeline by default, while retaining endpoints and movement order. The transform
-changes timing within the gesture, with no rotation, mirroring, noise, or new
-video files. Prepared samples remain `(32,128)`.
+## Downloads and browser exports
 
-The dashboard exposes Extra samples and Timing strength under dataset
-preparation. Set Extra samples to 3 to start; the existing Random seed controls
-repeatability. Activity shows actual generated totals and shortfalls. Motionless
-or sparsely detected sources may yield fewer valid, distinct samples than
-requested; originals are retained and duplicates are skipped.
+| Destination | Workflow |
+|---|---|
+| Python/Keras | **Download model ZIP** includes the checkpoint, labels, preprocessing, record, test history, and available reports. |
+| HUDYAT | **Export for HUDYAT → Create HUDYAT bundle** runs conversion in Activity; download when ready. |
+| FSL Pocket | Use `pwa-sample/tools/export_model.py` to update the browser category catalog. |
 
-Enabled datasets save `video_augmentation_report.json` with source-level
-requests, actual counts, skipped candidates, and shortfall reasons. The manifest
-records each generated sample's time map; `preprocessing.json` records the
-version and settings. `augmentation_summary.json` separates generated
-sequence samples from static variants. Training copies the augmentation report
-into its run folder. Prediction continues to use ordinary preprocessing.
+HUDYAT bundles contain versioned browser weights, metadata, model/preprocessing
+parity fixtures, the matching detector, reports, and an importer that preserves
+other category releases. Importing prepares files; activate the release separately
+with HUDYAT's `npm run models:register`. See the
+[HUDYAT export guide](integrations/hudyat/README.md) for import and verification.
 
-Choose a fresh dataset output. The existing resume command requires exactly
-matching preprocessing metadata; changing augmentation settings therefore calls
-for a fresh training run. The initial timing limits are settings to evaluate,
-not a recognition-accuracy claim. See the [agreed design](docs/design/video-augmentation.md).
+### FSL Pocket PWA
+
+FSL Pocket performs recognition in the browser, supports category model downloads
+and removal, cached offline use, held poses, two-second gestures, and live alphabet
+prediction. Camera frames stay in the browser. Existing exports are included;
+additional Keras runs must be exported.
+
+```powershell
+cd pwa-sample
+npm ci
+npm run setup
+npm start
+```
+
+Open **http://localhost:8080**. Use `npm.cmd` if PowerShell blocks `npm`.
+Later starts can reuse the installed dependencies/assets. For phone use, serve
+the complete prepared `pwa-sample/dist/` directory over HTTPS.
+
+From the repository root, export a compatible raw-media-trained model:
+
+```powershell
+.\.venv\Scripts\python.exe pwa-sample/tools/export_model.py --category alphabet --run runs/alphabet/my_run_v1
+```
+
+The exporter verifies architecture/detector compatibility and provides model-output
+and camera-preprocessing parity fixtures. Exporting retains saved preprocessing
+and does not retrain models or establish live accuracy.
+
+The PWA can download labeled webcam trials as JSON containing labels, scores,
+and landmarks without camera images. Turn a downloaded report into plots:
+
+```powershell
+.\.venv\Scripts\python.exe confusion_matrix.py --report "reports/webcam-test-alphabet.json" --output reports/webcam/alphabet_session1
+```
+
+Use an actual report path. See the [FSL Pocket guide](pwa-sample/README.md) for
+setup, storage, camera evaluation, and browser verification.
+
+## Project layout
+
+```text
+fsl_trainer/
+  data/                  Source discovery, extraction, preprocessing, augmentation
+  training/              Preparation/validation, training, prediction, disk cache
+  reporting/             Benchmark summaries and confusion matrices
+  dashboard/             Local server, desktop window, workers, UI, model records
+src/fsl_trainer/          Packaged CLI modules
+tests/                   Python and dashboard JavaScript checks
+tools/                   Export, timing, and portability utilities
+integrations/hudyat/      Browser preprocessing and HUDYAT bundle importer
+pwa-sample/               FSL Pocket app, export tools, and browser tests
+data/                    Original local recordings
+datasets_augmented/      Named prepared datasets and their training caches
+runs/                    Checkpoints, evaluation reports, and testing records
+models/                  Shared MediaPipe hand detector
+exports/                 Generated export ZIPs and timing test pages
+docs/                    Setup, design notes, diagnostics, validation records
+learning/                Lessons, references, and learning notes
+augmentation/            Augmentation development workspace and conventions
+```
+
+Root entry points `dashboard.py`, `categories.py`, `trainer.py`, and
+`confusion_matrix.py` remain supported. New Python code can import the
+`fsl_trainer` package directly. Default artifact locations follow the repository.
+
+## Verification
+
+From the repository root, with the Python requirements installed:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -v
+```
+
+The suite covers extraction, preprocessing, grouping/leakage, augmentation,
+training caches, category commands, architecture, reporting, dashboard jobs,
+records, exports, and camera capture/timing. TensorFlow-dependent checks are
+skipped when TensorFlow is unavailable.
+
+Dashboard-only checks do not need ML packages:
+
+```powershell
+python -m unittest discover -s tests/dashboard -v
+node --test tests/dashboard/ui.test.cjs tests/dashboard/camera-timing.test.mjs
+```
+
+After PWA dependency/asset setup, run from `pwa-sample/`:
+
+```powershell
+npm test
+npm run parity
+```
+
+Parity checks require exported models. Model-output parity does not measure live
+accuracy, phone installation, or physical camera behavior.
+See [validation records](docs/VALIDATION.md) for recorded verification.
+
+## Troubleshooting
+
+| Problem | Next step |
+|---|---|
+| Output already contains data | Choose a fresh dataset/run name; partial outputs are retained. |
+| Not enough independent groups | Add independent usable sources and inspect duplicate/detection rejections. |
+| Camera needs raw-media metadata | Use compatible `.npy` input, or prepare raw media and train a new run. |
+| Hand model differs from training | Supply the original detector with `--hand-model`. |
+| Desktop window cannot open | Check WebView2 and `requirements-desktop.txt`, or use `--browser`. |
+| Port 8090 is occupied | Stop the other server or pass `--port 8091`. |
+| `/api/live/start` returns 404 after an update | Restart `dashboard.py`; refreshing does not reload Python routes. |
+| Browser category unavailable | Export a compatible run, reload online, and download its model. |
+
+Run any CLI subcommand with `--help` for its complete option list.
+Further material: [user guide](USER_GUIDE.md),
+[repository setup](docs/REPOSITORY.md), [HUDYAT integration](integrations/hudyat/README.md),
+[FSL Pocket](pwa-sample/README.md), [gesture glossary](GLOSSARY.md), and
+[learning index](learning/README.md).
