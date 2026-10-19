@@ -28,7 +28,8 @@ from .camera_timing import camera_session, save_camera_timing
 from .live import LiveInference
 from .timing import capture_timing
 from .model_records import run_metadata, read_records, save_record
-from .prediction_tests import read_tests, save_test, export_model
+from .prediction_tests import read_tests, save_test, export_model, append_trial
+from .prediction_trials import trials_csv, metrics_csv
 from .model_exports import native_archive, saved_run, export_options, matching_hand_model, download_name
 
 BASE = PROJECT_ROOT
@@ -471,6 +472,15 @@ class Handler(BaseHTTPRequestHandler):
                 test = read_tests(BASE).get(query.get("id", [""])[0])
                 if test is None:
                     raise ValueError("Prediction test not found.")
+                format = query.get('format', ['json'])[0]
+                if format in ('trials', 'metrics'):
+                    if not test.get('automated'):
+                        raise ValueError('CSV measurements require an automated test.')
+                    payload = (trials_csv(test) if format == 'trials' else metrics_csv(test)).encode('utf-8-sig')
+                    return self.download(io.BytesIO(payload), f"prediction-test-{test['number']}-{format}.csv",
+                                         'text/csv; charset=utf-8')
+                if format != 'json':
+                    raise ValueError('Choose a JSON, trials CSV, or metrics CSV export.')
                 return self.reply({"version": 1, "test": test}, filename=f"prediction-test-{test['number']}.json")
             if url.path == "/api/jobs":
                 return self.reply(self.server.jobs.snapshot())
@@ -518,6 +528,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(save_camera_timing(BASE, data, runs()))
             if self.path == "/api/prediction-test":
                 return self.reply(save_test(BASE, data, runs()))
+            if self.path == "/api/prediction-test/trial":
+                return self.reply(append_trial(BASE, data))
             if self.path == "/api/model-record":
                 return self.reply({"model_records": save_record(BASE, data, runs())})
             if self.path == "/api/live/start":

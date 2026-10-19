@@ -56,6 +56,16 @@ class MovingGestureTests(unittest.TestCase):
         self.predictor = LivePredictor(self.model, ['afternoon', 'evening'], Extractor(), 'motion')
         self.addCleanup(self.predictor.close)
 
+    def test_frame_results_identify_hand_presence_for_automatic_trial_timing(self):
+        missing = self.predictor.frame(np.zeros(128, dtype=np.float32), 0)
+        self.assertFalse(missing['hand_detected'])
+        present = self.predictor.frame(hand(.1), 200)
+        self.assertTrue(present['hand_detected'])
+        pose = LivePredictor(self.model, ['afternoon', 'evening'], Extractor(), 'pose')
+        self.addCleanup(pose.close)
+        self.assertFalse(pose.frame(np.zeros(128, dtype=np.float32), 0)['hand_detected'])
+        self.assertTrue(pose.frame(hand(.1), 200)['hand_detected'])
+
     def test_holding_ending_does_not_replace_motion_with_pose_only_prediction(self):
         results = []
         for timestamp in range(0, 6401, 200):

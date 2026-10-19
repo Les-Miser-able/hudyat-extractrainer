@@ -492,6 +492,41 @@ counts, and median recognition time are manual observations and stay blank until
 measured. Saving an existing test edits it; choose Save as test run again for
 the next test.
 
+For automatic measurements, open **Try a prediction → Automated test recording**
+below the live camera. Start the camera, select the **Expected gesture**, and
+choose **Start test session**. This saves a model/settings snapshot and arms the
+first attempt. After each attempt, select the next expected gesture and choose
+**Next trial**. Each attempt automatically saves its actual/predicted label,
+probabilities, confidence, outcome, timestamps, response time, capture details,
+and camera settings. A held pose counts once per trial. Model loading is outside
+the trial; a 15-second timeout starts with its first submitted camera frame.
+
+Live accuracy, per-gesture precision/recall/F1, the confusion matrix, and timing
+summaries are derived from the saved trials. Wrong predictions, timeouts,
+incomplete captures, stopped attempts, and errors count as unsuccessful attempts.
+Macro precision/recall/F1 and lowest gesture recall remain unknown until every
+model gesture has been attempted. Response median/p95/max include all returned
+predictions, including incorrect ones; attempts without a prediction retain an
+outcome and elapsed time instead of a response time.
+
+Camera response starts before submitting the first frame whose extraction
+detects a hand and ends when the prediction response arrives in the browser.
+It includes encoding, local HTTP/worker processing, hand extraction, gesture
+capture and its finish delay, preprocessing, and inference. It excludes waiting
+before that hand frame and browser result rendering. Its scope is
+`trainer_camera_first_hand_to_prediction_received`; HUDYAT's independently
+measured confirmation/rendering benchmark remains separate.
+
+Choose **Finish session** when done. **Download metrics CSV** includes session
+and per-gesture measurements; **Download trials CSV** includes individual
+attempts. Both are also available under **Model runs → Prediction test runs**.
+CSV scores are ratios from 0 to 1; missing measurements are empty cells. The full
+JSON additionally retains probabilities, the confusion matrix, browser/camera
+details, and the frozen model snapshot. Camera images/videos are not stored.
+Each completed attempt is written atomically. A failed save keeps the attempt
+on the page for **Retry saving attempt** and blocks further trials; keep the
+page open until it succeeds. Retrying the same attempt never duplicates it.
+
 Records persist in `runs/model_records.json`; tests persist in
 `runs/prediction_tests.json`. They reference models without copying checkpoints
 or retraining. **Prediction test runs** supports filtering, editing, JSON downloads,

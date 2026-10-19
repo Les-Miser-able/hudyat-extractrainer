@@ -451,6 +451,43 @@ class DashboardHTTPTests(unittest.TestCase):
                 self.assertEqual(self.request('/api/model/export/download?id=' + job_id)[0], 400)
         self.assertEqual(self.request('/api/model/export/download?id=../outside')[0], 400)
 
+    def test_automatic_trials_are_authorized_persistent_and_exportable_as_csv(self):
+        run_id = 'runs/colors/automatic_fixture'
+        run = Path(self.temp.name) / run_id
+        run.mkdir(parents=True, exist_ok=True)
+        (run / 'classes.json').write_text('["blue", "red"]')
+        headers = {'X-Dashboard-Token': 'test-token'}
+        status, body = self.request('/api/prediction-test', {'run': run_id, 'automated': True}, headers)
+        self.assertEqual(status, 200)
+        test = json.loads(body)['test']
+        payload = {'id': test['id'], 'trial': {'id': '00112233445566778899aabbccddeeff',
+            'expected': 'blue', 'outcome': 'prediction', 'probabilities': {'blue': .8, 'red': .2},
+            'elapsed_ms': 700, 'response_ms': 500, 'captured_at': '2026-10-17T10:00:00Z',
+            'settings': {'mode': 'gesture', 'settle_ms': 600, 'missing_ms': 400, 'frame_interval_ms': 50}}}
+        self.assertEqual(self.request('/api/prediction-test/trial', payload)[0], 403)
+        self.assertEqual(self.request('/api/prediction-test/trial', payload, headers)[0], 200)
+        status, body = self.request('/api/prediction-test/trial', payload, headers)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)['test']['measurements']['trials'], 1)
+        state = json.loads(self.request('/api/state')[1])
+        self.assertEqual(state['prediction_tests'][test['id']]['record']['live_correct'], 1)
+        self.assertEqual(self.request('/api/prediction-test/trial', {**payload, 'id': 'missing'}, headers)[0], 400)
+        for format in ('metrics', 'trials'):
+            with urlopen(self.origin + '/api/prediction-test/export?id=' + test['id'] + '&format=' + format) as response:
+                self.assertEqual(response.headers['Content-Type'], 'text/csv; charset=utf-8')
+                self.assertIn(f'-{format}.csv', response.headers['Content-Disposition'])
+                rows = list(csv.DictReader(io.StringIO(response.read().decode('utf-8-sig'))))
+            if format == 'metrics':
+                self.assertEqual(rows[0]['Accuracy'], '1.0')
+                self.assertEqual(rows[0]['Median response (ms)'], '500.0')
+                self.assertEqual(rows[0]['Coverage complete'], 'False')
+            else:
+                self.assertEqual(rows[0]['Expected gesture'], 'blue')
+                self.assertEqual(rows[0]['Predicted gesture'], 'blue')
+        exported = json.loads(self.request('/api/prediction-test/export?id=' + test['id'])[1])
+        self.assertEqual(len(exported['test']['trials']), 1)
+        self.assertEqual(self.request('/api/prediction-test/export?id=' + test['id'] + '&format=bad')[0], 400)
+
     def test_live_endpoints_validate_paths_and_forward_frames(self):
         root = Path(self.temp.name)
         run = root / "runs" / "colors" / "live_fixture"
