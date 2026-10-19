@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const crypto = require('node:crypto');
 
 function dashboard() {
   const nodes = new Map();
@@ -26,7 +27,7 @@ function dashboard() {
     window: {addEventListener() {}}, location: {hash: '#datasets'},
     // Leave the initial network scan pending; tests supply state explicitly.
     fetch: () => new Promise(() => {}), setInterval() {}, setTimeout() {}, clearTimeout() {},
-    performance: {now: () => 100}, console
+    performance: {now: () => 100}, crypto, console
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../../fsl_trainer/dashboard/ui/app.js'), 'utf8'), context);
   vm.runInContext("loading = false; token = 'test-token';", context);
@@ -746,4 +747,219 @@ test('HUDYAT camera test prepares the selected run and Activity opens only compl
   app.run("jobs[0].status='completed';renderJob();");
   assert.equal(app.node('open-hudyat-timing').hidden,false);
   assert.equal(app.node('open-hudyat-timing').href,'/hudyat-timing/0011223344556677/');
+});
+
+function automaticCamera(app, mode = 'pose') {
+  camera(app);
+  const saved = {id: 'auto-1', run: 'runs/colors/first', name: 'Test 1', number: 1,
+    created_at: '2026-10-17T10:00:00', automated: true, record: {}, trials: [],
+    model: {id: 'runs/colors/first', name: 'first', category: 'colors', class_labels: ['blue', 'red']}};
+  app.context.automaticFixture = saved;
+  app.run(`state.runs=[{...automaticFixture.model,checkpoint:true}];
+    state.prediction_tests={'auto-1':automaticFixture};
+    liveActive=true; liveSession='fixture'; liveVersion=7; liveCaptureVersion=2;
+    automatedTest='auto-1'; automatedViewedTest='auto-1';`);
+  app.node('live-mode').value = mode;
+  app.node('live-settle-ms').value = '600';
+  app.node('live-missing-ms').value = '400';
+  app.node('live-frame-ms').value = '50';
+  app.run('controls()');
+  return saved;
+}
+
+function savedAutomaticReply(saved, payload) {
+  const probabilities = payload.trial.probabilities;
+  const predicted = Object.keys(probabilities).sort((a, b) => probabilities[b] - probabilities[a])[0] || null;
+  const test = {...saved, trials: [{...payload.trial, predicted, correct: predicted === payload.trial.expected}]};
+  return {ok: true, json: async () => ({test, prediction_tests: {[test.id]: test}})};
+}
+
+test('starting an automated session snapshots the model settings and resets movement capture', async () => {
+  const app = dashboard(), saved = automaticCamera(app, 'gesture'), requests = [];
+  app.run("automatedTest=''; automatedViewedTest=''; state.prediction_tests={};");
+  app.node('auto-test-name').value = 'Camera comparison';
+  app.node('auto-test-device').value = 'Laptop / signer 01';
+  app.context.fetch = async (url, options) => {
+    requests.push([url, JSON.parse(options.body)]);
+    return {ok: true, json: async () => url === '/api/prediction-test'
+      ? {test: saved, prediction_tests: {[saved.id]: saved}} : {status: 'waiting'}};
+  };
+  await app.run('startAutomatedTest()');
+  assert.equal(requests[0][0], '/api/prediction-test');
+  assert.equal(requests[0][1].automated, true);
+  assert.equal(requests[0][1].name, 'Camera comparison');
+  assert.equal(requests[0][1].device, 'Laptop / signer 01');
+  assert.equal(requests[0][1].mode, 'gesture');
+  assert.equal(requests[0][1].settle_ms, 600);
+  assert.equal(requests[1][0], '/api/live/reset');
+  assert.equal(app.run('automatedTrial.expected'), 'blue');
+  assert.equal(app.run('automatedTrial.startedAt'), null, 'the timeout starts with the first submitted frame');
+  assert.equal(app.node('auto-test-expected').disabled, true);
+  assert.equal(app.node('live-settle-ms').disabled, true);
+  assert.equal(app.node('live-next').disabled, true);
+});
+
+test('a held pose automatically records one wrong attempt rather than counting every camera frame', async () => {
+  const app = dashboard(), saved = automaticCamera(app), requests = [];
+  let now = 100;
+  app.context.performance.now = () => now;
+  app.context.fetch = async (url, options) => {
+    const payload = JSON.parse(options.body); requests.push([url, payload, options]);
+    if (url === '/api/prediction-test/trial') return savedAutomaticReply(saved, payload);
+    now = 340;
+    return {ok: true, json: async () => ({status: 'prediction', hand_detected: true,
+      probabilities: {blue: .2, red: .8}, frames: 1})};
+  };
+  await app.run('beginAutomatedTrial();');
+  await app.run('liveFrame(liveVersion)');
+  await app.run('liveFrame(liveVersion)');
+  const saves = requests.filter(([url]) => url === '/api/prediction-test/trial');
+  assert.equal(saves.length, 1);
+  assert.equal(saves[0][1].trial.expected, 'blue');
+  assert.equal(saves[0][1].trial.response_ms, 240);
+  assert.equal(saves[0][1].trial.elapsed_ms, 240);
+  assert.deepEqual(saves[0][1].trial.probabilities, {blue: .2, red: .8});
+  assert.equal(saves[0][2].keepalive, true);
+  assert.equal(app.run("state.prediction_tests['auto-1'].trials[0].correct"), false);
+  assert.equal(app.run('automatedTrial'), null);
+  assert.equal(app.node('auto-test-next').disabled, false);
+  assert.equal(app.node('auto-test-expected').disabled, false);
+});
+
+test('camera response starts at the first hand frame and a timeout cannot be overwritten by a late prediction', async () => {
+  const app = dashboard(), saved = automaticCamera(app), requests = [];
+  app.context.fetch = async (url, options) => {
+    const payload = JSON.parse(options.body); requests.push(payload);
+    return savedAutomaticReply(saved, payload);
+  };
+  await app.run('beginAutomatedTrial()');
+  app.run('const timedTrial=automatedTrial; startAutomatedFrame(timedTrial, 100);');
+  await app.run("observeAutomatedFrame(timedTrial,{status:'waiting',hand_detected:false},100,300)");
+  await app.run("observeAutomatedFrame(timedTrial,{status:'capturing',hand_detected:true},500,650)");
+  await app.run("observeAutomatedFrame(timedTrial,{status:'prediction',probabilities:{blue:.8,red:.2},frames:12,duration_ms:1000},1500,1800)");
+  assert.equal(requests[0].trial.elapsed_ms, 1700);
+  assert.equal(requests[0].trial.response_ms, 1300);
+  assert.equal(requests[0].trial.duration_ms, 1000);
+  await app.run('beginAutomatedTrial()');
+  app.run('const expiredTrial=automatedTrial; startAutomatedFrame(expiredTrial,100);');
+  app.context.performance.now = () => 15100;
+  await app.run("finishAutomatedTrial('timeout')");
+  await app.run("observeAutomatedFrame(expiredTrial,{status:'prediction',probabilities:{blue:.8,red:.2}},100,16000)");
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].trial.outcome, 'timeout');
+  assert.equal(requests[1].trial.elapsed_ms, 15000);
+  assert.equal(requests[1].trial.response_ms, null);
+  assert.deepEqual(requests[1].trial.probabilities, {});
+});
+
+test('a failed automatic save retains its trial ID for retry and blocks further recording', async () => {
+  const app = dashboard(), saved = automaticCamera(app), requests = [];
+  let fail = true;
+  app.context.fetch = async (url, options) => {
+    const payload = JSON.parse(options.body); requests.push(payload);
+    return fail ? {ok: false, json: async () => ({error: 'Disk is full'})} : savedAutomaticReply(saved, payload);
+  };
+  await app.run('beginAutomatedTrial()');
+  app.run('startAutomatedFrame(automatedTrial, 100)');
+  await app.run("finishAutomatedTrial('incomplete')");
+  assert.match(app.node('auto-test-status').textContent, /Disk is full/);
+  assert.equal(app.node('auto-test-retry').hidden, false);
+  assert.equal(app.node('auto-test-next').disabled, true);
+  await app.run('beginAutomatedTrial(); finishAutomatedTest();');
+  assert.equal(requests.length, 1);
+  assert.equal(app.run('automatedTest'), 'auto-1');
+  fail = false;
+  await app.run('saveAutomatedTrial()');
+  assert.deepEqual(requests[0], requests[1]);
+  assert.equal(app.run('automatedPending'), null);
+  assert.equal(app.node('auto-test-retry').hidden, true);
+  assert.equal(app.node('auto-test-next').disabled, false);
+});
+
+test('stopping the camera records an unfinished attempt and ignores the old in-flight frame', async () => {
+  const app = dashboard(), saved = automaticCamera(app), requests = [];
+  let frame;
+  app.context.fetch = async (url, options) => {
+    const payload = JSON.parse(options.body); requests.push([url, payload]);
+    if (url === '/api/live/frame') return new Promise(resolve => { frame = resolve; });
+    if (url === '/api/prediction-test/trial') return savedAutomaticReply(saved, payload);
+    return {ok: true, json: async () => ({ok: true})};
+  };
+  await app.run('beginAutomatedTrial()');
+  const pending = app.run('liveFrame(liveVersion)');
+  await app.run('stopLive()');
+  frame({ok: true, json: async () => ({status: 'prediction', probabilities: {blue: .8, red: .2}})});
+  await pending;
+  const saves = requests.filter(([url]) => url === '/api/prediction-test/trial');
+  assert.equal(saves.length, 1);
+  assert.equal(saves[0][1].trial.outcome, 'stopped');
+  assert.equal(saves[0][1].trial.response_ms, null);
+  assert.equal(app.run('liveActive'), false);
+});
+
+test('an old frame submitted before a trial is armed cannot count toward that trial', async () => {
+  const app = dashboard(), saved = automaticCamera(app), requests = [];
+  let frame;
+  app.context.fetch = async (url, options) => {
+    requests.push(url);
+    if (url === '/api/live/frame') return new Promise(resolve => { frame = resolve; });
+    return savedAutomaticReply(saved, JSON.parse(options.body));
+  };
+  const pending = app.run('liveFrame(liveVersion)');
+  await app.run('beginAutomatedTrial()');
+  frame({ok: true, json: async () => ({status: 'prediction', probabilities: {blue: .8, red: .2}})});
+  await pending;
+  assert.equal(requests.length, 1);
+  assert.notEqual(app.run('automatedTrial'), null);
+  assert.equal(app.run('automatedTrial.startedAt'), null);
+});
+
+test('automated test CSV actions use the correct format and editable observations retain measured counts', async () => {
+  const app = dashboard(), saved = automaticCamera(app), downloads = [];
+  app.run("automatedTest=''; openTestEditor('auto-1');");
+  assert.equal(app.node('record-live_trials').readOnly, true);
+  assert.equal(app.node('record-response_ms').readOnly, true);
+  app.run("editModelRecord('runs/colors/first')");
+  assert.equal(app.node('record-live_trials').readOnly, false);
+  app.context.URL = {createObjectURL: () => 'blob:test', revokeObjectURL() {}};
+  app.context.document.body = {append() {}};
+  app.context.document.createElement = () => ({click() {}, remove() {}});
+  app.context.fetch = async url => {
+    downloads.push(url);
+    return {ok: true, blob: async () => ({}), headers: {get: () => 'attachment; filename="trials.csv"'}};
+  };
+  app.documentHandlers.click({target: {closest: selector => selector === '[data-test-csv]'
+    ? {dataset: {testCsv: 'auto 1', testFormat: 'trials'}} : null}});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(downloads[0], '/api/prediction-test/export?id=auto%201&format=trials');
+  app.run('renderTestHistory()');
+  assert.match(app.node('prediction-tests').innerHTML, /Download metrics CSV/);
+  assert.match(app.node('prediction-tests').innerHTML, /Download trials CSV/);
+});
+
+test('an early or stale timeout callback cannot fail an attempt before its deadline', async () => {
+  const app = dashboard(), saved = automaticCamera(app), timers = [], requests = [];
+  let now = 100;
+  app.context.performance.now = () => now;
+  app.context.setTimeout = (callback, delay) => { timers.push([callback, delay]); return timers.length; };
+  app.context.fetch = async (url, options) => {
+    const payload = JSON.parse(options.body); requests.push(payload);
+    return savedAutomaticReply(saved, payload);
+  };
+  await app.run('beginAutomatedTrial()');
+  app.run('startAutomatedFrame(automatedTrial,100)');
+  now = 15099.5;
+  timers[0][0]();
+  assert.equal(requests.length, 0);
+  assert.equal(timers[1][1], 1);
+  now = 15100;
+  timers[1][0]();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].trial.elapsed_ms, 15000);
+  await app.run('beginAutomatedTrial()');
+  timers[0][0]();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(requests.length, 1, 'the previous timer must not timeout the new trial');
+  assert.notEqual(app.run('automatedTrial'), null);
 });

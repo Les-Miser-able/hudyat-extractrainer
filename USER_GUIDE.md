@@ -413,7 +413,39 @@ for every class to appear in all three splits.
 
 Train with `--dataset-name grouped_v1`. Grouping is independent per category.
 
-### Measure webcam recognition
+### Automatically record trainer camera tests
+
+In FSL Studio, open **Try a prediction**, select your trained model and gesture
+mode, and start the camera. Scroll to **Automated test recording**:
+
+1. Select the **Expected gesture** you are about to perform. Optionally enter a
+   test name and device/session description.
+2. Click **Start test session** and perform that gesture once. The app saves the
+   first prediction automatically. In held-pose mode, it counts one result.
+3. Select the expected gesture for your next attempt, then click **Next trial**.
+   Repeat for every gesture and include incorrect results.
+4. Click **Finish session** after the last attempt is saved.
+5. Download **metrics CSV**, **trials CSV**, or **full JSON** below the results.
+   Saved sessions are also under **Model runs → Prediction test runs**.
+
+The app calculates accuracy, macro precision/recall/F1, lowest gesture recall,
+per-gesture scores, and response median/p95/max. Macro metrics and lowest recall
+appear after every model gesture has at least one attempt. CSV scores use 0–1
+ratios, so 0.85 means 85%.
+
+Each attempt records its expected/recognized gesture, confidence, timing, and
+camera settings. Wrong predictions, 15-second timeouts, incomplete captures,
+stopped attempts, and errors count as unsuccessful. Attempts without a prediction
+retain their elapsed time and outcome. They have no response time. If a save
+fails, keep the page open and click **Retry saving attempt** before continuing.
+
+Response time starts at the first submitted frame with a detected hand and ends
+when the prediction reaches the browser. It includes capture delays and server
+processing; HUDYAT's camera confirmation/rendering benchmark is separate. The app
+saves test records rather than camera videos. Restart the dashboard and refresh
+the page after updating the trainer to load the new recording controls.
+
+### Measure webcam recognition in FSL Pocket
 
 In the app, select Alphabet, download its model, and enable the camera. Expand
 **Measure webcam accuracy**, choose the **Actual letter**, recognize a sign, then

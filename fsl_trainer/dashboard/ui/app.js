@@ -13,18 +13,20 @@ let liveCaptureVersion = 0, liveResetting = false;
 let predictionTestsVersion = 0, editingTest = null, editingPrediction = null, suggestedTestName = '';
 const latestPredictions = {sample: null, live: null};
 let exportingRun = '';
+let automatedTest = '', automatedViewedTest = '', automatedTrial = null, automatedPending = null;
+let automatedSaving = false, automatedStarting = false, automatedTimer = null;
 
 function notice(message, error = false) {
   $('notice').textContent = message;
   $('notice').classList.toggle('error', error);
   $('notice').hidden = !message;
 }
-async function api(path, body) {
+async function api(path, body, options = {}) {
   const response = await fetch(path, body === undefined ? {cache: 'no-store'} : {
-    method: 'POST', headers: {'Content-Type': 'application/json', 'X-Dashboard-Token': token}, body: JSON.stringify(body)
+    method: 'POST', headers: {'Content-Type': 'application/json', 'X-Dashboard-Token': token}, body: JSON.stringify(body), ...options
   });
   const result = await response.json();
-  if (response.status === 404 && ['/api/model-record', '/api/prediction-test'].includes(path)) {
+  if (response.status === 404 && ['/api/model-record', '/api/prediction-test', '/api/prediction-test/trial'].includes(path)) {
     throw new Error('Restart dashboard.py and refresh the page to enable saved model records and prediction tests.');
   }
   if (response.status === 404 && path.startsWith('/api/live/')) {
@@ -158,6 +160,7 @@ function editModelRecord(id) {
   $('model-record-description').textContent = 'Save your decision, tested slider values, and live observations.';
   $('model-record-hint').textContent = 'Choosing Preferred replaces your previous preferred run for this category. These records remain after restarting the dashboard.';
   const record = modelRecord(id);
+  for (const key of ['live_trials', 'live_correct', 'response_ms']) $('record-' + key).readOnly = false;
   $('model-record-title').textContent = `Record: ${title(run.category)} / ${run.name}`;
   for (const name of recordFields) $('record-' + name).value = record[name] ?? (name === 'decision' ? 'Not tested' : '');
   $('model-record-error').hidden = true;
@@ -223,6 +226,7 @@ async function recordCameraSettings() {
   } catch (error) { notice(error.message, true); }
 }
 async function useRecordedRun(id, settings = null) {
+  if (automatedTest || automatedStarting) { notice('Finish the current automated test session before switching models.', true); return; }
   if (!state.runs.some(r => r.id === id && r.checkpoint)) return;
   if (liveActive) await stopLive();
   const record = settings || modelRecord(id);
@@ -280,7 +284,7 @@ function renderTestHistory() {
   $('prediction-tests').innerHTML = rows.length ? `<table class="prediction-test-table"><thead><tr><th>Test / model</th><th>Tested settings</th><th>Live results</th><th>Saved prediction</th><th>Notes</th><th>Actions</th></tr></thead><tbody>${rows.map(test => {
     const r = test.record, prediction = test.prediction;
     const ranked = Object.entries(prediction?.probabilities || {}).sort((a, b) => b[1] - a[1]);
-    return `<tr><td><strong>${escapeHTML(test.name)}</strong><small>${escapeHTML(title(test.model.category))} / ${escapeHTML(test.model.name)}</small><small>Saved: ${escapeHTML(test.created_at.replace('T', ' '))}</small>${modelDescription(test.model)}</td><td>${escapeHTML({motion:'Moving gesture', gesture:'Perform once', pose:'Held pose'}[r.mode] || 'Not recorded')}<small>Stillness: ${recordValue(r.settle_ms)} ms</small><small>Hands missing: ${recordValue(r.missing_ms)} ms</small><small>Frame interval: ${recordValue(r.frame_interval_ms)} ms</small></td><td>${recordPercent(r.live_trials && r.live_correct != null ? r.live_correct / r.live_trials : null)}<small>${recordValue(r.live_correct)} / ${recordValue(r.live_trials)} correct</small><small>Median recognition: ${recordValue(r.response_ms)} ms</small><small>Tested: ${recordValue(r.tested_on)}</small></td><td>${ranked.length ? `${escapeHTML(ranked[0][0])} · ${percent(ranked[0][1])}<small>${prediction.source === 'live' ? 'Live camera' : 'Sample file'} · ${escapeHTML(prediction.captured_at.replace('T', ' '))}</small>${prediction.sample ? `<small>${escapeHTML(prediction.sample)}</small>` : ''}` : 'No prediction attached'}</td><td><div class="record-notes">${escapeHTML(r.notes || 'No notes yet.')}</div><small>${escapeHTML(r.device || '')}</small></td><td><div class="record-actions"><button class="button secondary" type="button" data-edit-test="${escapeHTML(test.id)}">Edit test</button><button class="button secondary" type="button" data-download-test="${escapeHTML(test.id)}">Download test</button><button class="button secondary" type="button" data-retry-test="${escapeHTML(test.id)}" ${state.runs.some(m => m.id === test.run && m.checkpoint) ? '' : 'disabled'}>Try these settings</button></div></td></tr>`;
+    return `<tr><td><strong>${escapeHTML(test.name)}</strong><small>${escapeHTML(title(test.model.category))} / ${escapeHTML(test.model.name)}</small><small>Saved: ${escapeHTML(test.created_at.replace('T', ' '))}</small>${modelDescription(test.model)}</td><td>${escapeHTML({motion:'Moving gesture', gesture:'Perform once', pose:'Held pose'}[r.mode] || 'Not recorded')}<small>Stillness: ${recordValue(r.settle_ms)} ms</small><small>Hands missing: ${recordValue(r.missing_ms)} ms</small><small>Frame interval: ${recordValue(r.frame_interval_ms)} ms</small></td><td>${recordPercent(r.live_trials && r.live_correct != null ? r.live_correct / r.live_trials : null)}<small>${recordValue(r.live_correct)} / ${recordValue(r.live_trials)} correct</small><small>Median ${test.automated ? 'camera response' : 'recognition'}: ${recordValue(r.response_ms)} ms</small>${test.automated ? automatedMeasurements(test, false) : ''}<small>Tested: ${recordValue(r.tested_on)}</small></td><td>${ranked.length ? `${escapeHTML(ranked[0][0])} · ${percent(ranked[0][1])}<small>${prediction.source === 'live' ? 'Live camera' : 'Sample file'} · ${escapeHTML(prediction.captured_at.replace('T', ' '))}</small>${prediction.sample ? `<small>${escapeHTML(prediction.sample)}</small>` : ''}` : 'No prediction attached'}</td><td><div class="record-notes">${escapeHTML(r.notes || 'No notes yet.')}</div><small>${escapeHTML(r.device || '')}</small></td><td><div class="record-actions"><button class="button secondary" type="button" data-edit-test="${escapeHTML(test.id)}" ${test.id === automatedTest ? 'disabled' : ''}>Edit test</button><button class="button secondary" type="button" data-download-test="${escapeHTML(test.id)}">Download test</button>${test.automated ? automatedDownloads(test.id) : ''}<button class="button secondary" type="button" data-retry-test="${escapeHTML(test.id)}" ${state.runs.some(m => m.id === test.run && m.checkpoint) ? '' : 'disabled'}>Try these settings</button></div></td></tr>`;
   }).join('')}</tbody></table>` : empty('No saved prediction tests match these filters. Try a model, then choose Save as test run.');
   renderTestControls();
 }
@@ -292,6 +296,7 @@ function renderTestControls() {
   $('record-test-name').required = editingTest !== null;
   $('model-record-close').disabled = recordSaving;
   $('model-record-copy').disabled = recordSaving;
+  renderAutomatedControls();
 }
 function openTestEditor(id = '', source = 'live') {
   if (recordSaving) return;
@@ -317,6 +322,8 @@ function openTestEditor(id = '', source = 'live') {
   $('model-record-title').textContent = `${$('record-test-name').value} · ${title(model.category)} / ${model.name}`;
   $('model-record-description').textContent = 'Save a separate test run with this model’s description, settings, and observations.';
   $('model-record-hint').textContent = 'Trial counts and recognition time are manual measurements. Leave unmeasured fields blank. Saving again updates this test; Save as test run starts a new numbered test.';
+  for (const key of ['live_trials', 'live_correct', 'response_ms']) $('record-' + key).readOnly = Boolean(saved?.automated);
+  if (saved?.automated) $('model-record-hint').textContent = 'Counts and response time are calculated from the recorded attempts. Edit the name, notes, or device description here. Download metrics and trials from Prediction test runs.';
   $('model-record-save').textContent = 'Save test run';
   $('model-record-error').hidden = true;
   $('model-record-editor').hidden = false;
@@ -336,6 +343,140 @@ async function downloadRecord(path) {
     document.body.append(link); link.click(); link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   } catch (error) { notice(error.message, true); }
+}
+function automatedDownloads(id) {
+  return ['metrics', 'trials'].map(format => `<button class="button secondary" type="button" data-test-csv="${escapeHTML(id)}" data-test-format="${format}">Download ${format} CSV</button>`).join('');
+}
+function automatedMeasurements(test, detailed = true) {
+  const m = test.measurements;
+  if (!m) return '';
+  const timing = m.timing;
+  const milliseconds = value => typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : '—';
+  const summary = `<p>Accuracy: ${recordPercent(m.accuracy)} · Macro precision: ${recordPercent(m.macro_precision)} · Macro recall: ${recordPercent(m.macro_recall)} · Macro F1: ${recordPercent(m.macro_f1)} · Lowest gesture recall: ${recordPercent(m.lowest_sign_recall)}</p>
+    <p>${fmt(m.correct)} / ${fmt(m.trials)} correct · ${fmt(m.outcomes.timeout)} timeouts · ${fmt(m.outcomes.incomplete)} incomplete · ${fmt(m.outcomes.stopped)} stopped · ${fmt(m.outcomes.error)} errors</p>
+    <p>Camera response median: ${milliseconds(timing.median_ms)} ms · p95: ${milliseconds(timing.p95_ms)} ms · ${fmt(timing.samples)} timed predictions</p>
+    <p class="hint">${m.coverage_complete ? 'All model gestures attempted.' : `Remaining gestures: ${escapeHTML(m.missing_signs.join(', '))}. Macro metrics require an attempt for every gesture.`}</p>`;
+  if (!detailed) return `<details><summary>Automatic live metrics</summary>${summary}</details>`;
+  return `<h3>${escapeHTML(test.name)}</h3>${summary}<div class="table-wrap" tabindex="0" aria-label="Per-gesture live test metrics"><table><thead><tr><th>Gesture</th><th>Attempts</th><th>Correct</th><th>Precision</th><th>Recall</th><th>F1</th><th>Unrecognized</th></tr></thead><tbody>${Object.entries(m.per_class).map(([label, row]) => `<tr><td>${escapeHTML(label)}</td><td>${fmt(row.support)}</td><td>${fmt(row.correct)}</td><td>${recordPercent(row.precision)}</td><td>${row.support ? recordPercent(row.recall) : '—'}</td><td>${row.support ? recordPercent(row.f1) : '—'}</td><td>${fmt(row.unrecognized)}</td></tr>`).join('')}</tbody></table></div><div class="job-actions" style="justify-content:flex-start;flex-wrap:wrap">${automatedDownloads(test.id)}<button class="button secondary" type="button" data-download-test="${escapeHTML(test.id)}">Download full JSON</button></div>`;
+}
+function renderAutomatedControls() {
+  const test = state.prediction_tests?.[automatedTest || automatedViewedTest];
+  const model = state.runs.find(r => r.id === $('predict-run').value);
+  const labels = automatedTest && test ? test.model.class_labels : model?.class_labels || [];
+  const choices = JSON.stringify(labels);
+  if ($('auto-test-expected').dataset.choices !== choices) {
+    populate($('auto-test-expected'), labels.map(label => [label, label]), 'Select a trained model');
+    $('auto-test-expected').dataset.choices = choices;
+  }
+  const busy = automatedStarting || automatedSaving || Boolean(automatedTrial) || Boolean(automatedPending);
+  $('auto-test-start').disabled = Boolean(automatedTest) || busy || !liveSession || !token || !labels.length || recordSaving;
+  $('auto-test-next').disabled = !automatedTest || busy || !liveSession || !token;
+  $('auto-test-finish').disabled = !automatedTest || automatedStarting || automatedSaving || Boolean(automatedPending);
+  $('auto-test-retry').hidden = !automatedPending;
+  $('auto-test-retry').disabled = automatedSaving;
+  $('auto-test-name').disabled = Boolean(automatedTest) || automatedStarting;
+  $('auto-test-device').disabled = Boolean(automatedTest) || automatedStarting;
+  $('auto-test-expected').disabled = busy;
+  for (const id of ['live-settle-ms', 'live-missing-ms', 'live-frame-ms']) $(id).disabled = Boolean(automatedTrial) || automatedStarting;
+  const results = test ? automatedMeasurements(test) : '';
+  if ($('auto-test-results').innerHTML !== results) $('auto-test-results').innerHTML = results;
+}
+function acceptAutomatedTest(result) {
+  state.prediction_tests = {...state.prediction_tests, [result.test.id]: result.test};
+  ++predictionTestsVersion;
+  renderTestHistory();
+}
+async function startAutomatedTest() {
+  if (automatedTest || automatedStarting || automatedPending || !liveSession || recordSaving) return;
+  const run = $('predict-run').value, version = liveVersion;
+  if (!state.runs.find(r => r.id === run)?.class_labels?.includes($('auto-test-expected').value)) return;
+  automatedStarting = true; controls();
+  $('auto-test-status').textContent = 'Creating a saved test session…';
+  try {
+    const result = await api('/api/prediction-test', {run, automated: true,
+      ...($('auto-test-name').value.trim() ? {name: $('auto-test-name').value.trim()} : {}),
+      ...liveTiming(), frame_interval_ms: liveFrameInterval(), mode: $('live-mode').value,
+      device: $('auto-test-device').value,
+      device_details: {browser: navigator.userAgent || '', platform: navigator.platform || '',
+        camera: liveStream?.getVideoTracks?.()[0]?.getSettings?.() || {}}});
+    automatedTest = result.test.id; automatedViewedTest = automatedTest;
+    acceptAutomatedTest(result);
+    automatedStarting = false;
+    if (version === liveVersion && liveSession) await beginAutomatedTrial();
+    else $('auto-test-status').textContent = 'Session saved. Start the camera and select Next trial to record an attempt.';
+  } catch (error) { $('auto-test-status').textContent = error.message; notice(error.message, true); }
+  finally { automatedStarting = false; controls(); }
+}
+async function beginAutomatedTrial() {
+  if (!automatedTest || automatedStarting || automatedTrial || automatedPending || automatedSaving || !liveSession) return;
+  const expected = $('auto-test-expected').value;
+  if (!state.prediction_tests?.[automatedTest]?.model.class_labels.includes(expected)) return;
+  const version = liveVersion;
+  automatedStarting = true; controls();
+  try {
+    if ($('live-mode').value !== 'pose') await nextGesture();
+    if (version !== liveVersion || !liveSession) return;
+    automatedTrial = {id: crypto.randomUUID().replaceAll('-', ''), expected,
+      captured_at: new Date().toISOString(), armedAt: performance.now(), startedAt: null, handStartedAt: null,
+      settings: {...liveTiming(), frame_interval_ms: liveFrameInterval(), mode: $('live-mode').value}};
+    $('auto-test-status').textContent = `Recording ${expected}. Perform the gesture once; the result will save automatically.`;
+  } catch (error) { $('auto-test-status').textContent = error.message; notice(error.message, true); }
+  finally { automatedStarting = false; controls(); }
+}
+function startAutomatedFrame(trial, startedAt) {
+  if (!trial || trial !== automatedTrial || trial.startedAt !== null) return;
+  trial.startedAt = startedAt;
+  automatedTimer = setTimeout(() => timeoutAutomatedTrial(trial), 15000);
+}
+function timeoutAutomatedTrial(trial) {
+  if (trial !== automatedTrial) return;
+  const remaining = 15000 - (performance.now() - trial.startedAt);
+  if (remaining > 0) automatedTimer = setTimeout(() => timeoutAutomatedTrial(trial), Math.ceil(remaining));
+  else finishAutomatedTrial('timeout');
+}
+async function observeAutomatedFrame(trial, result, frameStartedAt, receivedAt = performance.now()) {
+  if (!trial || trial !== automatedTrial) return;
+  if (result.hand_detected && trial.handStartedAt === null) trial.handStartedAt = frameStartedAt;
+  if (result.status === 'prediction') {
+    trial.handStartedAt ??= frameStartedAt;
+    await finishAutomatedTrial('prediction', result, receivedAt);
+  } else if (result.status === 'incomplete') await finishAutomatedTrial('incomplete', {}, receivedAt);
+}
+async function finishAutomatedTrial(outcome, result = {}, now = performance.now()) {
+  const trial = automatedTrial;
+  if (!trial) return;
+  automatedTrial = null;
+  clearTimeout(automatedTimer); automatedTimer = null;
+  automatedPending = {id: automatedTest, trial: {id: trial.id, expected: trial.expected,
+    outcome, captured_at: trial.captured_at, settings: trial.settings,
+    elapsed_ms: now - (trial.startedAt ?? trial.armedAt),
+    response_ms: outcome === 'prediction' ? now - trial.handStartedAt : null,
+    probabilities: outcome === 'prediction' ? result.probabilities : {},
+    frames: result.frames ?? null, duration_ms: result.duration_ms ?? null}};
+  await saveAutomatedTrial();
+}
+async function saveAutomatedTrial() {
+  if (!automatedPending || automatedSaving) return;
+  automatedSaving = true; controls();
+  $('auto-test-status').textContent = 'Saving the recorded attempt…';
+  try {
+    const result = await api('/api/prediction-test/trial', automatedPending, {keepalive: true});
+    automatedPending = null;
+    acceptAutomatedTest(result);
+    const trial = result.test.trials.at(-1);
+    $('auto-test-status').textContent = `Attempt saved: expected ${trial.expected}; ${trial.predicted ? `recognized ${trial.predicted}` : trial.outcome}. Select the expected gesture and Next trial when ready.`;
+  } catch (error) {
+    $('auto-test-status').textContent = `Attempt has not been saved: ${error.message} Keep this page open and select Retry saving attempt.`;
+    notice('The recorded attempt is waiting to be saved. Retry before closing this page.', true);
+  } finally { automatedSaving = false; controls(); }
+}
+async function finishAutomatedTest() {
+  if (!automatedTest || automatedStarting || automatedSaving || automatedPending) return;
+  await finishAutomatedTrial('stopped');
+  if (automatedPending) return;
+  automatedTest = '';
+  $('auto-test-status').textContent = 'Session finished. Every recorded attempt is saved. Download the metrics and trial records below or under Model runs.';
+  renderTestHistory(); controls();
 }
 function openModelExport(id) {
   const run = state.runs.find(r => r.id === id);
@@ -378,10 +519,10 @@ function controls() {
   datasetPaths();
   $('live-start').disabled = loading || submitting || active || liveActive || !token || !$('predict-run').value;
   $('live-stop').disabled = !liveActive;
-  $('predict-run').disabled = liveActive;
+  $('predict-run').disabled = liveActive || Boolean(automatedTest) || automatedStarting;
   $('live-mode').disabled = liveActive;
   $('live-next').hidden = !['gesture', 'motion'].includes($('live-mode').value);
-  $('live-next').disabled = !liveActive || !liveSession || liveResetting;
+  $('live-next').disabled = !liveActive || !liveSession || liveResetting || Boolean(automatedTrial) || automatedStarting;
   $('model-record-save').disabled = recordSaving || !token;
   $('live-record').disabled = recordSaving || !token || !$('predict-run').value;
   renderTestControls();
@@ -510,17 +651,25 @@ async function liveFrame(version) {
     canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
     canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
     canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+    const trial = automatedTrial;
+    startAutomatedFrame(trial, frameStartedAt);
     const settings = {...liveTiming(), frame_interval_ms: liveFrameInterval(), mode: $('live-mode').value};
     const result = await api('/api/live/frame', {session: liveSession,
       image: canvas.toDataURL('image/jpeg', .8), timestamp: performance.now(),
       timing: {settle_ms: settings.settle_ms, missing_ms: settings.missing_ms}});
+    const receivedAt = performance.now();
     if (version !== liveVersion) return;
-    if (captureVersion === liveCaptureVersion) showLiveResult(result, settings);
+    if (captureVersion === liveCaptureVersion) {
+      showLiveResult(result, settings);
+      await observeAutomatedFrame(trial, result, frameStartedAt, receivedAt);
+    }
+    if (version !== liveVersion) return;
     // Keep requests serial and count processing time toward the frame interval.
     const delay = Math.max(0, liveFrameInterval() - (performance.now() - frameStartedAt));
     liveTimer = setTimeout(() => liveFrame(version), delay);
   } catch (error) {
     if (version !== liveVersion) return;
+    await finishAutomatedTrial('error');
     await stopLive();
     $('live-status').textContent = error.message;
   }
@@ -571,6 +720,7 @@ async function stopLive() {
   $('live-result').replaceChildren();
   $('live-status').textContent = 'Camera stopped.';
   controls();
+  await finishAutomatedTrial('stopped');
   if (session) {
     try { await api('/api/live/stop', {session}); }
     catch (error) { $('live-status').textContent = `Camera stopped. ${error.message} The idle worker will expire automatically.`; }
@@ -675,6 +825,8 @@ document.addEventListener('click', event => {
   if (downloadModel) downloadRecord(`/api/model-record/export?run=${encodeURIComponent(downloadModel.dataset.downloadModel)}`);
   const downloadTest = event.target.closest('[data-download-test]');
   if (downloadTest) downloadRecord(`/api/prediction-test/export?id=${encodeURIComponent(downloadTest.dataset.downloadTest)}`);
+  const testCSV = event.target.closest('[data-test-csv]');
+  if (testCSV) downloadRecord(`/api/prediction-test/export?id=${encodeURIComponent(testCSV.dataset.testCsv)}&format=${encodeURIComponent(testCSV.dataset.testFormat)}`);
   const editTest = event.target.closest('[data-edit-test]');
   if (editTest) openTestEditor(editTest.dataset.editTest);
   const retryTest = event.target.closest('[data-retry-test]');
@@ -720,6 +872,10 @@ $('model-record-form').addEventListener('submit', event => { event.preventDefaul
 $('model-record-close').addEventListener('click', () => { $('model-record-editor').hidden = true; });
 $('model-record-copy').addEventListener('click', copyCameraSettings);
 $('live-record').addEventListener('click', recordCameraSettings);
+$('auto-test-start').addEventListener('click', startAutomatedTest);
+$('auto-test-next').addEventListener('click', beginAutomatedTrial);
+$('auto-test-retry').addEventListener('click', saveAutomatedTrial);
+$('auto-test-finish').addEventListener('click', finishAutomatedTest);
 $('job-select').addEventListener('change', renderJob);
 $('cancel-job').addEventListener('click', async () => {
   $('cancel-job').disabled = true;

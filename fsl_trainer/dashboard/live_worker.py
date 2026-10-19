@@ -66,6 +66,7 @@ class LivePredictor:
                                     message='Result held. Perform another gesture when ready.')
                 elif captured['status'] == 'capturing':
                     self.has_result = False
+                captured['hand_detected'] = bool(features[126:].any())
                 return captured
             frames = captured['frames']
             times = np.array([item[0] for item in frames])
@@ -75,19 +76,21 @@ class LivePredictor:
                 raw_sequence = preprocess_sequence(raw_sequence, *self.frame_size, self.normalization)
             sequence = resample(raw_sequence, positions)
         elif not features[126:].any():
-            return {"status": "no_hand", "probabilities": {}, "message": "No hand detected."}
+            return {"status": "no_hand", "probabilities": {}, "hand_detected": False, "message": "No hand detected."}
         else:
             raw_sequence = features[None]
             if self.normalization != IMAGE:
                 raw_sequence = preprocess_sequence(raw_sequence, *self.frame_size, self.normalization)
             sequence = resample(raw_sequence)
         if not sequence[:, 126:].any():
-            return {"status": "no_hand", "probabilities": {}, "message": "No usable hand landmarks detected."}
+            return {"status": "no_hand", "probabilities": {}, "hand_detected": bool(features[126:].any()),
+                    "message": "No usable hand landmarks detected."}
         probabilities = np.asarray(self.model(sequence[None], training=False))[0]
         if (probabilities.shape != (len(self.classes),) or not np.isfinite(probabilities).all()
                 or (probabilities < 0).any() or (probabilities > 1).any()):
             raise ValueError("The selected model returned invalid class probabilities.")
         response = {"status": "prediction", "probabilities": dict(zip(self.classes, map(float, probabilities))),
+                    "hand_detected": bool(features[126:].any()),
                     "frames": len(captured['frames']) if captured else 1}
         if captured:
             response.update(complete=True, duration_ms=captured['duration_ms'],
