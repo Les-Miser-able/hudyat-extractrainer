@@ -1,8 +1,8 @@
 # FSL Studio — Conv1D–BiLSTM Trainer
 
 A local workspace for preparing Filipino Sign Language (FSL) datasets, training
-gesture classifiers, and testing saved models. FSL Studio combines a desktop or
-browser dashboard with Python command-line tools, live camera testing, and
+gesture classifiers, and testing saved models. FSL Studio combines a native Qt
+desktop workspace with Python command-line tools, live camera testing, and
 browser model exports for FSL Pocket and HUDYAT.
 
 Static poses and moving gestures share the same **32-frame × 128-feature** input
@@ -58,15 +58,23 @@ py -3.12 -m venv .venv
 
 ### Open FSL Studio
 
-Install the optional desktop dependency and launch the dashboard:
+Install the native desktop dependency and launch FSL Studio:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -r requirements-desktop.txt
 .\.venv\Scripts\python.exe dashboard.py
 ```
 
-The desktop window uses Microsoft Edge WebView2. If it cannot open, install or
-repair the WebView2 Runtime, or use browser mode:
+The default app uses **Python / PySide6 Qt Widgets** with movable, dockable panels.
+It does not embed a website, use WebView2, or start an HTTP server. The Extractor,
+Trainer, Model runs, and Prediction workspaces call the existing Python services
+directly. Existing datasets, checkpoints, and reports are reused.
+
+Use **Import category** to copy a folder of gesture classes into a new category;
+select a source or dataset in the explorer to preview media or configure a job.
+See the [native desktop guide](docs/NATIVE_DESKTOP.md) for controls and shortcuts.
+
+The previous browser dashboard remains an explicit optional mode:
 
 ```powershell
 .\.venv\Scripts\python.exe dashboard.py --browser
@@ -77,9 +85,9 @@ Browser mode does not need the desktop dependency. Browsing saved results does
 not require TensorFlow; preparation, training, and prediction use the dependencies
 in the **same Python environment that starts the dashboard**.
 
-Use **Datasets** to prepare and validate a dataset, **Training** to train it,
-**Model runs** to review results, and **Try a prediction** to test a file or camera.
-Add original files through your file manager, then refresh the source library.
+In native mode use **Extractor** to prepare a dataset, **Trainer** to validate and
+train it, **Model runs** to review results, and **Prediction** to test a file or
+camera. You can also add original files through your file manager and refresh.
 
 ### Prepare, train, and predict from the CLI
 
@@ -293,6 +301,8 @@ to image coordinates; select hand-relative features explicitly as shown above.
 default, or set `--jitter` in that profile's units. Static poses repeat for
 32 timesteps; noise affects only present-hand coordinates. Legacy image-coordinate
 augmentation uses independent Gaussian noise without rotation or mirroring.
+Mirroring currently applies to the synthetic static hand-relative variants;
+multi-frame video augmentation varies timing without mirroring.
 
 Hand-relative features convert XYZ to pixel units using width/height, center
 landmarks 1–20 on the wrist, and scale them by each frame's pixel palm length
@@ -461,15 +471,18 @@ Pauses can finish capture early; camera shake can start it. Captures exceeding
 six seconds or 512 frames are rejected. Frame delivery pauses over one second
 reset unfinished captures.
 
-The preview is mirrored; model input is unmirrored. Frames go only to the local
+In browser mode the preview is mirrored; model input is unmirrored. Native mode
+offers a live **Mirror preview** toggle and **Fullscreen camera** view, with a
+resizable camera area. Preview mirroring leaves model input unmirrored.
+Frames go only to the local
 worker and are not saved. Stop live prediction before other jobs. Leaving the
 prediction view or hiding the tab ends capture; abandoned workers expire after
 60 seconds. See the saved [greetings normalization diagnosis](docs/diagnostics/greetings-vs-colors.md)
 when assessing older checkpoints.
 
-The dashboard binds to loopback and starts one background job at a time.
+The optional browser dashboard binds to loopback. Both modes start one background job at a time.
 Activity history lasts until restart; generated artifacts persist. **Stop job**
-keeps partial outputs. Closing the desktop window stops the server/camera workers
+keeps partial outputs. Closing the desktop window stops its job/camera workers
 and asks before stopping an active job. In browser mode, use Ctrl+C in its terminal.
 
 ## Model comparison and test records
@@ -656,6 +669,7 @@ fsl_trainer/
   training/              Preparation/validation, training, prediction, disk cache
   reporting/             Benchmark summaries and confusion matrices
   dashboard/             Local server, desktop window, workers, UI, model records
+  desktop/               Native Qt workspaces, dock panels, monitors, media workers
 src/fsl_trainer/          Packaged CLI modules
 tests/                   Python and dashboard JavaScript checks
 tools/                   Export, timing, and portability utilities
@@ -714,8 +728,8 @@ See [validation records](docs/VALIDATION.md) for recorded verification.
 | Not enough independent groups | Add independent usable sources and inspect duplicate/detection rejections. |
 | Camera needs raw-media metadata | Use compatible `.npy` input, or prepare raw media and train a new run. |
 | Hand model differs from training | Supply the original detector with `--hand-model`. |
-| Desktop window cannot open | Check WebView2 and `requirements-desktop.txt`, or use `--browser`. |
-| Port 8090 is occupied | Stop the other server or pass `--port 8091`. |
+| Desktop window cannot open | Install `requirements-desktop.txt` using the Python that launches the app. |
+| Port 8090 is occupied in browser mode | Stop the other server or pass `--browser --port 8091`. Native mode uses no port. |
 | `/api/live/start` returns 404 after an update | Restart `dashboard.py`; refreshing does not reload Python routes. |
 | Browser category unavailable | Export a compatible run, reload online, and download its model. |
 

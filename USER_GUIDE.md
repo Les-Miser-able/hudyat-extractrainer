@@ -1,10 +1,16 @@
 # FSL Trainer: step-by-step user guide
 
-Use this guide to add sign images or videos, train a model, and try it in the browser.
+Use this guide to add sign images or videos, train a model, and try it locally.
 Commands are written for **Windows PowerShell**. Run each command separately and wait
 for it to finish before continuing.
 
-**Already have a trained model and just want to try the camera? Go to [Step 8](#8-open-the-browser-app).**
+**For the native desktop app, see the [desktop guide](docs/NATIVE_DESKTOP.md).**
+Launch it with `.\.venv\Scripts\python.exe dashboard.py` after installing
+`requirements-desktop.txt`. Its Extractor, Trainer, Model runs, and Prediction
+tabs use native Qt widgets; no browser is embedded. The remaining guide also
+covers the command-line tools and the separate optional browser/PWA workflow.
+
+**For the separate browser camera app, go to [Step 8](#8-open-the-browser-app).**
 
 ## The workflow
 

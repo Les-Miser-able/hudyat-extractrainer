@@ -1,5 +1,49 @@
 # Verification
 
+## Larger native camera and preview mirroring — 2026-10-20
+
+- Enlarged the camera area, made Recognition compact with a draggable divider,
+  and added a native fullscreen preview with Start/Stop/Next controls and Esc to
+  return. Mirror preview updates live in both views and persists locally.
+- Mirroring is a display transform: pixel checks verify the rendered left/right
+  reversal while the original frame remains unchanged. Fullscreen checks verify
+  incoming frame updates, synchronized mirror controls, and Escape behavior.
+- All 100 dashboard checks and 15 existing hand-relative preprocessing checks
+  passed. Visually verified the normal and fullscreen layouts using a local video
+  sample with the camera off. Physical webcam hardware was not exercised.
+- Augmentation behavior remains unchanged: synthetic static hand-relative training
+  variants can mirror with hand-slot swaps; video variants use timing changes only.
+
+## Native camera timing request fix — 2026-10-20
+
+- Reproduced the reported `Timing must contain only settle_ms and missing_ms.`
+  error through the native camera worker and the real `LiveInference.frame`
+  validator. The camera incorrectly included its local frame interval in the
+  gesture timing request.
+- Kept frame cadence in the native camera loop and forwarded only gesture delays
+  to inference. Strengthened the existing camera regression to exercise the real
+  timing validation instead of mocking that boundary. Verified the test fails
+  before the fix and passes afterward; all 98 dashboard tests pass.
+- The regression simulates camera frames; physical webcam recognition was not
+  exercised. Restart the running desktop app to load the corrected worker code.
+
+## Native Qt desktop workspaces — 2026-10-20
+
+- Replaced the default WebView2 host with native PySide6 Qt Widgets. Launch tests
+  verify that desktop mode creates no HTTP server and browser mode does not load Qt.
+- All 98 dashboard tests passed on Python 3.13.13, including native widget rendering,
+  dataset selection, existing command validation, live CSV chart updates, cancellation,
+  model review persistence, saved prediction tests, refresh preservation, camera
+  transport with a simulated device, import protections, and worker shutdown.
+- Rendered and visually inspected all four actual workspaces offscreen using the
+  project's 9 category folders and 22 saved runs. Decoded an existing 90-frame video,
+  sought to frame 21, and verified the actual MediaPipe hand overlay. Preview PNGs
+  are in `outputs/native-desktop/`; `tools/preview_desktop.py` recreates them.
+- `pip check` and `git diff --check` passed. Real datasets, checkpoints, and review
+  records were read without starting training or modifying saved model artifacts.
+  Physical webcam behavior was not exercised. The advanced browser-only trial
+  recorder and HUDYAT timing page remain separate optional tools.
+
 ## In-dashboard model comparison and manual records — 2026-10-14
 
 - Expanded Model runs into a comparison table with saved dataset/source details,

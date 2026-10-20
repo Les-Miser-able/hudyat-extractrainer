@@ -353,9 +353,13 @@ class Jobs:
             self.items[0]["status"] = "cancelled"
             self.items[0]["logs"].append("Stopped by user. Partial outputs were kept; use a new output name to retry.")
 
-    def snapshot(self):
-        with self.lock:
+    def snapshot(self, *, blocking=True):
+        if not self.lock.acquire(blocking=blocking):
+            return None
+        try:
             return [{**item, "logs": list(item["logs"])} for item in self.items]
+        finally:
+            self.lock.release()
 
     def shutdown(self):
         with self.lock:
@@ -587,25 +591,27 @@ class DashboardHTTPServer(ThreadingHTTPServer):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--port", type=int, default=8090)
+    parser.add_argument("--port", type=int, default=8090, help="HTTP port for explicit --browser mode.")
     parser.add_argument("--browser", action="store_true",
                         help="Serve the browser UI without opening a desktop window.")
     args = parser.parse_args(argv)
     if not 0 <= args.port <= 65535:
         parser.error("--port must be between 0 and 65535 (0 selects a free port).")
-    desktop = None
     if not args.browser:
         from .desktop import DesktopWindow
+        jobs = Jobs()
         try:
-            desktop = DesktopWindow()
+            DesktopWindow().run(jobs)
         except RuntimeError as error:
             parser.exit(1, f"FSL Studio: {error}\n")
+        finally:
+            jobs.shutdown()
+        return
     try:
         server = DashboardHTTPServer(("127.0.0.1", args.port), Handler)
     except OSError as error:
         parser.exit(1, f"FSL Studio could not bind port {args.port}: {error}\n"
                     "Stop the other dashboard or use --port 8091.\n")
-    thread = None
     try:
         server.token = secrets.token_hex(32)
         server.jobs = Jobs()
@@ -613,23 +619,14 @@ def main(argv=None):
         url = f"http://localhost:{server.server_port}"
         print(f"FSL Studio: {url}", flush=True)
         print(f"Worker Python: {sys.executable}", flush=True)
-        if desktop is None:
-            print("Open the URL in your browser. Press Ctrl+C to stop.", flush=True)
-            server.serve_forever()
-        else:
-            print("Close the FSL Studio window to stop.", flush=True)
-            thread = threading.Thread(target=server.serve_forever, name="dashboard-http", daemon=True)
-            thread.start()
-            desktop.run(url, server.jobs)
+        print("Open the URL in your browser. Press Ctrl+C to stop.", flush=True)
+        server.serve_forever()
     except KeyboardInterrupt:
         pass
     except RuntimeError as error:
         parser.exit(1, f"FSL Studio: {error}\n")
     finally:
         try:
-            if thread is not None and thread.is_alive():
-                server.shutdown()
-                thread.join(timeout=5)
             if hasattr(server, "jobs"):
                 server.jobs.shutdown()
         finally:
