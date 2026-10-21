@@ -43,6 +43,7 @@ def run_metadata(run):
     selection = pre.get('source_selection', {})
     augmentation = pre.get('video_augmentation', {})
     return {'dataset': config.get('dataset'), 'source_folders': selection.get('folders'),
+            'evaluation_protocol': pre.get('evaluation_protocol'),
             'selected_sources': selection.get('selected_files'),
             'original_sources': len(originals) if originals else None,
             'input_kind': ', '.join(sorted(kinds)) or None, 'split_counts': counts,
@@ -131,17 +132,30 @@ def save_record(base, data, known_runs):
                 if other != run_id and known.get(other) == known[run_id] and previous.get('decision') == 'Preferred':
                     previous['decision'] = 'Testing'
         records[run_id] = record
-        path = base / 'runs' / 'model_records.json'
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = None
-        try:
-            with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent,
-                                             prefix='.model-records-', suffix='.tmp', delete=False) as handle:
-                temp_path = Path(handle.name)
-                json.dump({'version': 1, 'records': records}, handle, indent=2, ensure_ascii=False, allow_nan=False)
-                handle.write('\n')
-            os.replace(temp_path, path)
-        finally:
-            if temp_path is not None and temp_path.exists():
-                temp_path.unlink()
+        _write_records(base, records)
         return records
+
+
+def remove_record(base, run_id, archive):
+    """Archive and remove the review so reusing a deleted run name starts fresh."""
+    with _LOCK:
+        records = read_records(base)
+        if run_id in records:
+            archive.write_text(json.dumps(records.pop(run_id), indent=2), encoding='utf-8')
+            _write_records(base, records)
+
+
+def _write_records(base, records):
+    path = base / 'runs' / 'model_records.json'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent,
+                                         prefix='.model-records-', suffix='.tmp', delete=False) as handle:
+            temp_path = Path(handle.name)
+            json.dump({'version': 1, 'records': records}, handle, indent=2, ensure_ascii=False, allow_nan=False)
+            handle.write('\n')
+        os.replace(temp_path, path)
+    finally:
+        if temp_path is not None and temp_path.exists():
+            temp_path.unlink()

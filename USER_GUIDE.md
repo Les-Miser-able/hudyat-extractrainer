@@ -528,3 +528,18 @@ For the complete option lists:
 For deeper technical details, read [README.md](README.md). Preparation and
 normalization code lives in `src/fsl_trainer/preparation`; training code lives in
 `src/fsl_trainer/training`. You do not need to edit either folder for normal use.
+
+## Signer evaluation and deleting saved outputs
+
+For recordings arranged as `data/<category>/<gesture>/<signer>/`, choose **Leave
+one signer out** in preparation, select the test signer and a separate validation
+signer, then prepare a new dataset. Select that dataset in Training; its saved
+signer protocol is displayed and checked automatically. Use at least three signers
+with all gestures represented in training, validation, and test. Augmentation stays
+in training. Repeat once per signer, or use the CLI `--loso-all` batch option.
+See [the full LOSO workflow](docs/LEAVE_ONE_SIGNER_OUT.md).
+
+To remove a saved dataset or model, use its **Delete** action. Confirm the named
+item after stopping any active job or camera session. Files move into `.trash/`
+with recovery instructions recorded in `deletion.json`. Raw recordings stay in
+place. See [deletion and recovery](docs/DELETING_SAVED_ARTIFACTS.md).

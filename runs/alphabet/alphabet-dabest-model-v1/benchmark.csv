@@ -1,0 +1,2 @@
+Model,Run,Signs,Required signs,Accuracy (>=85%),Macro precision (>=85%),Macro recall (>=85%),Macro F1 (>=85%),Lowest sign recall (>=70%),Lowest recall signs,Response time (<1000 ms),Timing scope,Met benchmark?,Missing / failed checks
+Alphabet,alphabet-dabest-model-v1,26,26,98.776098%,98.853790%,98.781267%,98.803314%,92.682927%,M,,,Incomplete,response_time_ms: missing; camera_sign_coverage: missing; camera_response_completion: missing

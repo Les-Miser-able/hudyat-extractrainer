@@ -22,6 +22,7 @@ from ..paths import PROJECT_ROOT
 from ..data.augmentation_options import extra_samples, time_warp, mirror_hands
 from ..data.source_selection import SUPPORTED, VIDEO_EXTENSIONS, source_files, folder_selection
 from ..data.dataset_paths import dataset_name, prepared_datasets, select_dataset
+from ..data.signer_splits import options as split_options, signer_from_source, split_signers
 from ..data.preprocessing import IMAGE, HAND_RELATIVE, preparation_normalization
 from ..data.source_selection import IMAGE_EXTENSIONS
 from .camera_timing import camera_session, save_camera_timing
@@ -130,6 +131,7 @@ def inventory(data="data", datasets="datasets_augmented"):
         target = prepared / name
         versions = [{"name": p.name if p != target else "Original dataset",
                      "path": p.relative_to(BASE).as_posix(), "legacy": p == target,
+                     "evaluation_protocol": read_json(p / 'preprocessing.json', {}).get('evaluation_protocol'),
                      "summary": read_json(p / "augmentation_summary.json", {})}
                     for p in prepared_datasets(target)
                     if p.resolve() == BASE or BASE in p.resolve().parents]
@@ -169,6 +171,8 @@ def build_command(data):
         datasets = local_path(data.get("datasets", "datasets_augmented"))
         category_root = local_path(category, datasets)
     if action == "prepare":
+        strategy, test_signer, validation_signer = split_options(
+            data.get('split_strategy', 'grouped'), data.get('test_signer'), data.get('validation_signer'))
         dataset = local_path(dataset_name(data.get("dataset_name")), category_root)
         selected = folder_selection(data.get("source_folders"))
         videos_only = data.get("videos_only", False)
@@ -186,7 +190,7 @@ def build_command(data):
             raise ValueError("Dataset output already exists. Choose a new dataset name.")
         validation = number(data, "validation", .15, .001, .99)
         test = number(data, "test", .15, .001, .99)
-        if validation + test >= 1:
+        if strategy == 'grouped' and validation + test >= 1:
             raise ValueError("Validation and test fractions must sum to less than 1.")
         classes = source_classes(source, selected, videos_only)
         if selected is not None or videos_only:
@@ -194,6 +198,13 @@ def build_command(data):
         issue = preparation_issue(source, classes)
         if issue:
             raise ValueError(issue)
+        if strategy == 'loso':
+            files = [p for folder in source.iterdir() if folder.is_dir() and not folder.name.startswith('.')
+                     for p in source_files(folder, selected, videos_only)]
+            split_signers([{'source': p.relative_to(source).as_posix(), 'label': p.relative_to(source).parts[0],
+                            'group': p.relative_to(source).as_posix(),
+                            'signer': signer_from_source(p.relative_to(source).as_posix())} for p in files],
+                          test_signer, validation_signer)
         has_media = any(p.suffix.lower() in IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
                         for folder in source.iterdir() if folder.is_dir()
                         for p in source_files(folder, selected, videos_only))
@@ -206,6 +217,10 @@ def build_command(data):
                     "--detection-confidence", str(number(data, "confidence", .5, 0, 1))]
         if normalization != IMAGE:
             command += ["--normalization", normalization]
+        if strategy == 'loso':
+            command += ['--split-strategy', 'loso', '--test-signer', test_signer]
+            if validation_signer:
+                command += ['--validation-signer', validation_signer]
         if video_count:
             command += ["--video-extra-samples", str(video_count),
                         "--video-time-warp", str(video_strength)]
@@ -349,6 +364,15 @@ class Jobs:
             self.items.appendleft(job)
             threading.Thread(target=self.collect, args=(process, job), daemon=True).start()
             return job["id"]
+
+    def delete(self, data):
+        with self.lock:
+            if self.closed:
+                raise ValueError('The dashboard is closing.')
+            if self.live_active or self.process and self.process.poll() is None:
+                raise ValueError('Stop the running job or camera prediction before deleting saved artifacts.')
+            from .deletion import delete_artifact
+            return delete_artifact(BASE, data)
 
     def collect(self, process, job):
         try:
@@ -568,6 +592,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(append_trial(BASE, data))
             if self.path == "/api/model-record":
                 return self.reply({"model_records": save_record(BASE, data, runs())})
+            if self.path == '/api/delete':
+                return self.reply(self.server.jobs.delete(data))
             if self.path == "/api/live/start":
                 run = local_path(data.get("run"))
                 if BASE / "runs" not in run.parents or not (run / "best.keras").is_file():

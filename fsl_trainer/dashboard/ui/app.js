@@ -87,8 +87,13 @@ function datasetPaths() {
   $('prepare-output').textContent = `Output: ${$('dataset-root').value}/${category || '<category>'}/${name || '<dataset name>'}`;
   const selected = preparedChoices().find(d => d.path === $('train-dataset').value);
   $('training-source').textContent = selected
-    ? `Dataset: ${selected.path} · Output: runs/${$('train-form').elements.category.value}/<run name>`
+    ? `Dataset: ${selected.path} · ${protocolDescription(selected.evaluation_protocol)} · Output: runs/${$('train-form').elements.category.value}/<run name>`
     : 'Prepare a dataset, then select it here to train a model.';
+}
+function protocolDescription(protocol) {
+  return protocol?.strategy === 'leave_one_signer_out'
+    ? `LOSO test: ${protocol.test_signer}; validation: ${protocol.validation_signer}; train: ${protocol.train_signers.join(', ')}`
+    : 'Saved source-group split';
 }
 function sourceSelection() {
   return {source_folders: $('source-folder-mode').value === 'selected'
@@ -103,6 +108,8 @@ function renderSourceFolders() {
   folderCategory = category;
   const names = [...new Set(classes.flatMap(c => Object.keys(c.folders || {})))].sort();
   $('source-folder-options').innerHTML = names.map(name => `<label class="checkbox"><input type="checkbox" value="${escapeHTML(name)}" ${previous.get(name) !== false ? 'checked' : ''}> ${escapeHTML(name)}</label>`).join('') || '<span class="hint">No subfolders found beneath the gesture folders.</span>';
+  populate($('test-signer'), names.map(name => [name, name]), 'No signer subfolders found');
+  populate($('validation-signer'), [['', 'Automatic (next signer)'], ...names.map(name => [name, name])], 'Automatic');
 }
 function selectedClasses(category) {
   const selection = sourceSelection();
@@ -136,12 +143,12 @@ function modelRecordsTable(rows) {
     const liveAccuracy = record.live_trials && record.live_correct != null ? record.live_correct / record.live_trials : null;
     return `<tr><td><button class="run-link" data-run="${escapeHTML(r.id)}">${escapeHTML(r.name)}</button><small>${escapeHTML(title(r.category))}</small><details><summary>${fmt(r.classes)} classes</summary><span>${escapeHTML((r.class_labels || []).join(', ') || 'Class labels unavailable')}</span></details></td>
     <td><span class="tag ${record.decision === 'Preferred' ? 'ready' : ''}">${escapeHTML(record.decision || 'Not tested')}</span></td>
-    <td><span class="record-dataset">${escapeHTML(m.dataset || 'Dataset not recorded')}</span><small>Folders: ${escapeHTML(folders)}${m.input_kind ? ` · ${escapeHTML(m.input_kind)}` : ''}</small><small>Originals: ${recordValue(m.original_sources)} · Selected: ${recordValue(m.selected_sources)}</small><small>Train / validation / test: ${recordValue(counts.train)} / ${recordValue(counts.validation)} / ${recordValue(counts.test)}</small></td>
+    <td><span class="record-dataset">${escapeHTML(m.dataset || 'Dataset not recorded')}</span><small>${escapeHTML(protocolDescription(m.evaluation_protocol))}</small><small>Folders: ${escapeHTML(folders)}${m.input_kind ? ` · ${escapeHTML(m.input_kind)}` : ''}</small><small>Originals: ${recordValue(m.original_sources)} · Selected: ${recordValue(m.selected_sources)}</small><small>Train / validation / test: ${recordValue(counts.train)} / ${recordValue(counts.validation)} / ${recordValue(counts.test)}</small></td>
     <td><span>Epochs recorded / max: ${recordValue(m.epochs_recorded)} / ${recordValue(t.epochs)}</span><small>Batch: ${recordValue(t.batch_size)} · LR: ${recordValue(t.learning_rate)}</small><small>Patience: ${recordValue(t.patience)} · Seed: ${recordValue(t.seed)}</small><small>Class weights: ${t.class_weights == null ? '—' : t.class_weights ? 'Yes' : 'No'}</small><small>Static variants (images): ${recordValue(p.static_variants)} · Jitter: ${recordValue(p.jitter_std)}</small><small>Video extras: ${recordValue(p.video_extra_samples)} · Warp: ${recordValue(p.video_time_warp)} · Opposite-hand copies: ${p.video_mirror_hands == null ? 'Not recorded' : p.video_mirror_hands ? 'Yes' : 'No'}</small><small>Detection confidence: ${recordValue(p.detection_confidence)}</small>${t.resume_from ? `<small>Resumed: ${escapeHTML(t.resume_from)}</small>` : ''}</td>
     <td><strong>${recordPercent(r.accuracy)}</strong><small>Test accuracy</small><small>Macro F1: ${recordPercent(r.f1)}</small></td>
     <td><span>${escapeHTML(mode)}</span><small>Stillness: ${recordValue(record.settle_ms)} ms</small><small>Hands missing: ${recordValue(record.missing_ms)} ms</small><small>Frame interval: ${recordValue(record.frame_interval_ms)} ms</small><small>Live accuracy: ${recordPercent(liveAccuracy)}</small>${record.live_trials ? `<small>${recordValue(record.live_correct)} / ${recordValue(record.live_trials)} correct</small>` : ''}<small>Response: ${recordValue(record.response_ms)} ms</small>${record.tested_on ? `<small>Tested: ${escapeHTML(record.tested_on)}</small>` : ''}</td>
     <td><div class="record-notes">${escapeHTML(record.notes || 'No notes yet.')}</div>${record.device ? `<small>Device / session: ${escapeHTML(record.device)}</small>` : ''}</td>
-    <td><div class="record-actions"><button type="button" class="button secondary" data-record-run="${escapeHTML(r.id)}">Edit record</button><button type="button" class="button secondary" data-test-run="${escapeHTML(r.id)}" ${r.checkpoint ? '' : 'disabled'}>Try model</button><button type="button" class="button secondary" data-history-run="${escapeHTML(r.id)}">Test history (${Object.values(state.prediction_tests || {}).filter(t => t.run === r.id).length})</button><button type="button" class="button secondary" data-download-model="${escapeHTML(r.id)}">Download record</button><button type="button" class="button secondary" data-download-model-zip="${escapeHTML(r.id)}" ${(r.exports?.download ?? r.checkpoint) ? '' : 'disabled'}>Download model ZIP</button><button type="button" class="button secondary export-model-action" data-export-model="${escapeHTML(r.id)}" data-available="${Boolean(r.exports?.hudyat ?? r.checkpoint)}" title="${escapeHTML(r.exports?.reason || 'Create a browser model bundle for HUDYAT')}" ${(r.exports?.hudyat ?? r.checkpoint) ? '' : 'disabled'}>Export for HUDYAT</button></div></td></tr>`;
+    <td><div class="record-actions"><button type="button" class="button secondary" data-record-run="${escapeHTML(r.id)}">Edit record</button><button type="button" class="button secondary" data-test-run="${escapeHTML(r.id)}" ${r.checkpoint ? '' : 'disabled'}>Try model</button><button type="button" class="button secondary" data-history-run="${escapeHTML(r.id)}">Test history (${Object.values(state.prediction_tests || {}).filter(t => t.run === r.id).length})</button><button type="button" class="button secondary" data-download-model="${escapeHTML(r.id)}">Download record</button><button type="button" class="button secondary" data-download-model-zip="${escapeHTML(r.id)}" ${(r.exports?.download ?? r.checkpoint) ? '' : 'disabled'}>Download model ZIP</button><button type="button" class="button secondary export-model-action" data-export-model="${escapeHTML(r.id)}" data-available="${Boolean(r.exports?.hudyat ?? r.checkpoint)}" title="${escapeHTML(r.exports?.reason || 'Create a browser model bundle for HUDYAT')}" ${(r.exports?.hudyat ?? r.checkpoint) ? '' : 'disabled'}>Export for HUDYAT</button><button type="button" class="button danger submit-job" data-delete-kind="model" data-delete-path="${escapeHTML(r.id)}">Delete model</button></div></td></tr>`;
   }).join('')}</tbody></table>`;
 }
 let editingRecord = '', recordSaving = false;
@@ -494,7 +501,7 @@ function openModelExport(id) {
 function renderDatasets() {
   const search = $('category-search').value.toLowerCase();
   const rows = state.categories.filter(c => c.name.toLowerCase().includes(search));
-  $('dataset-list').innerHTML = rows.length ? rows.map(c => `<article class="dataset-item"><div class="dataset-item-heading"><div><span class="category-name">${escapeHTML(title(c.name))}</span><div class="category-meta">${fmt(c.samples)} sources · ${fmt(c.classes.length)} gesture folders · ${fmt(c.datasets?.length)} prepared datasets</div></div><span class="tag ${c.prepared ? 'ready' : ''}">${c.prepared ? 'Prepared' : 'Not prepared'}</span></div><div class="chips">${c.classes.map(g => `<span class="chip">${escapeHTML(g.name)} <small>${fmt(g.samples)}</small></span>`).join('') || '<span class="hint">No gesture folders yet.</span>'}</div>${(c.datasets || []).map(d => `<div class="dataset-version"><div><strong>${escapeHTML(d.name)}</strong><p class="hint">${escapeHTML(d.path)}${d.summary.total_output_sequences ? ` · ${fmt(d.summary.total_output_sequences)} prepared sequences` : ''}</p></div><button class="button secondary submit-job" type="button" data-inspect="${escapeHTML(c.name)}" data-dataset="${escapeHTML(d.path)}">Validate dataset ↗</button></div>`).join('')}<div class="dataset-actions"><button data-prepare="${escapeHTML(c.name)}">Prepare another dataset ↗</button></div></article>`).join('') : empty('No matching categories. Check your source and dataset folders.');
+  $('dataset-list').innerHTML = rows.length ? rows.map(c => `<article class="dataset-item"><div class="dataset-item-heading"><div><span class="category-name">${escapeHTML(title(c.name))}</span><div class="category-meta">${fmt(c.samples)} sources · ${fmt(c.classes.length)} gesture folders · ${fmt(c.datasets?.length)} prepared datasets</div></div><span class="tag ${c.prepared ? 'ready' : ''}">${c.prepared ? 'Prepared' : 'Not prepared'}</span></div><div class="chips">${c.classes.map(g => `<span class="chip">${escapeHTML(g.name)} <small>${fmt(g.samples)}</small></span>`).join('') || '<span class="hint">No gesture folders yet.</span>'}</div>${(c.datasets || []).map(d => `<div class="dataset-version"><div><strong>${escapeHTML(d.name)}</strong><p class="hint">${escapeHTML(d.path)}${d.summary.total_output_sequences ? ` · ${fmt(d.summary.total_output_sequences)} prepared sequences` : ''}</p></div><button class="button secondary submit-job" type="button" data-inspect="${escapeHTML(c.name)}" data-dataset="${escapeHTML(d.path)}">Validate dataset ↗</button><button class="button danger submit-job" type="button" data-delete-kind="dataset" data-delete-path="${escapeHTML(d.path)}">Delete dataset</button></div>`).join('')}<div class="dataset-actions"><button data-prepare="${escapeHTML(c.name)}">Prepare another dataset ↗</button></div></article>`).join('') : empty('No matching categories. Check your source and dataset folders.');
   controls();
   $('dataset-list').querySelectorAll('[data-inspect]').forEach(button => {
     button.insertAdjacentHTML('afterend', paperReportActions(button.dataset.dataset, 'dataset'));
@@ -527,6 +534,15 @@ function controls() {
   $('model-export-start').disabled ||= !state.runs.some(r => r.id === exportingRun && (r.exports?.hudyat ?? r.checkpoint));
   $('train-form').querySelector('[type="submit"]').disabled ||= !preparedChoices().some(d => d.path === $('train-dataset').value);
   datasetPaths();
+  const loso = $('split-strategy').value === 'loso';
+  $('signer-holdouts').hidden = !loso;
+  $('test-signer').disabled = !loso;
+  $('validation-signer').disabled = !loso;
+  $('test-signer').required = loso;
+  for (const key of ['validation', 'test']) {
+    const input = $('prepare-form').elements[key];
+    if (input) input.disabled = loso;
+  }
   $('live-start').disabled = loading || submitting || active || liveActive || !token || !$('predict-run').value;
   $('live-stop').disabled = !liveActive;
   $('predict-run').disabled = liveActive || Boolean(automatedTest) || automatedStarting;
@@ -557,6 +573,24 @@ function controls() {
   $('refresh').disabled = loading;
   $('scan-folders').disabled = loading || active;
   $('training-dot').hidden = !active;
+}
+async function deleteSaved(kind, path) {
+  if (loading || submitting || liveActive || jobs.some(j => j.status === 'running')) return;
+  const known = kind === 'model' ? state.runs.some(r => r.id === path)
+    : state.categories.some(c => c.datasets?.some(d => d.path === path));
+  if (!known || !window.confirm(`Move ${path} to local trash?\n\nSource recordings and other saved datasets/models stay available. Files can be recovered from .trash in the project folder.`)) return;
+  submitting = true; controls();
+  try {
+    const result = await api('/api/delete', {kind, path, data: $('data-root').value, datasets: $('dataset-root').value});
+    if (kind === 'model') {
+      if (selectedRun === path) { selectedRun = ''; ++runVersion; $('run-detail').hidden = true; }
+      if (editingRecord === path) { editingRecord = ''; $('model-record-editor').hidden = true; }
+      if (exportingRun === path) { exportingRun = ''; $('model-export-editor').hidden = true; }
+    }
+    await scan();
+    notice(`Deleted from workspace. Recovery folder: ${result.trash}`);
+  } catch (error) { notice(error.message, true); }
+  finally { submitting = false; controls(); }
 }
 async function startJob(data) {
   if (submitting) return;
@@ -817,6 +851,8 @@ for (const [id, action] of [['prepare-form', 'prepare'], ['train-form', 'train']
   });
 }
 document.addEventListener('click', event => {
+  const deletion = event.target.closest('[data-delete-kind]');
+  if (deletion) { deleteSaved(deletion.dataset.deleteKind, deletion.dataset.deletePath); return; }
   const allReports = event.target.closest('[data-paper-report-all]');
   if (allReports) { startJob({action: 'paper-report'}); return; }
   const runReport = event.target.closest('[data-paper-report-run]');
@@ -869,6 +905,7 @@ $('dataset-name').addEventListener('input', () => { $('prepare-error').hidden = 
 $('dataset-root').addEventListener('input', datasetPaths);
 $('train-form').elements.category.addEventListener('change', renderTrainingDatasets);
 $('train-dataset').addEventListener('change', controls);
+$('split-strategy').addEventListener('change', controls);
 $('source-folder-mode').addEventListener('change', controls);
 $('source-folder-options').addEventListener('change', controls);
 $('source-videos-only').addEventListener('change', controls);

@@ -8,7 +8,7 @@ from unittest.mock import patch
 from zipfile import ZipFile
 
 from fsl_trainer.reporting.paper import (Report, dataset_counts, save_dataset_report,
-                                         save_model_report, save_study_report)
+                                         save_model_report, save_study_report, save_loso_report)
 from fsl_trainer.dashboard.model_exports import native_archive
 from fsl_trainer.reporting.formatting import percentage
 from fsl_trainer.reporting.confusion_matrix import save_confusion_tables
@@ -25,6 +25,35 @@ def read_table(path):
 
 
 class PaperReportTests(unittest.TestCase):
+    def test_loso_report_formats_fold_scores_and_requires_complete_rotation_for_aggregates(self):
+        folds = []
+        for index, signer in enumerate(('S1', 'S2', 'S3')):
+            dataset, run = self.root / ('dataset-' + signer), self.root / ('run-' + signer)
+            write_json(dataset / 'preprocessing.json', {'evaluation_protocol': {
+                'strategy': 'leave_one_signer_out', 'test_signer': signer,
+                'validation_signer': ('S1', 'S2', 'S3')[(index + 1) % 3], 'all_signers': ['S1', 'S2', 'S3']}})
+            write_json(run / 'classes.json', ['A', 'B'])
+            value = (.7, .8, .9)[index]
+            write_json(run / 'test_metrics.json', {'accuracy': value, 'macro_precision': value,
+                'macro_recall': value, 'macro_f1': value, 'lowest_sign_recall': value,
+                'per_class': {c: {'precision': value, 'recall': value, 'f1': value, 'support': 5} for c in ('A', 'B')}})
+            folds.append((dataset, run))
+        output = self.root / 'loso'
+        save_loso_report(folds, output)
+        table = read_table(output / 'loso_folds.csv')
+        self.assertEqual([r['Accuracy (%)'] for r in table], ['70.00%', '80.00%', '90.00%'])
+        summary = read_table(output / 'loso_summary.csv')
+        self.assertEqual(summary[0]['Mean (%)'], '80.00%')
+        self.assertEqual(summary[0]['Sample SD (percentage points)'], '10.00%')
+        for name in ('loso_folds', 'loso_summary', 'loso_variation'):
+            self.assertTrue((output / (name + '.png')).is_file())
+        save_loso_report(folds[:-1], output)
+        self.assertFalse((output / 'loso_summary.csv').exists())
+        self.assertFalse((output / 'loso_variation.png').exists())
+        save_loso_report(folds[:-1], self.root / 'partial-loso')
+        self.assertFalse((self.root / 'partial-loso/loso_summary.csv').exists())
+        self.assertIn('incomplete', (self.root / 'partial-loso/index.html').read_text())
+
     def test_percentage_units_are_explicit_and_do_not_change_other_values(self):
         self.assertEqual(percentage(.987), '98.70%')
         self.assertEqual(percentage(0), '0.00%')

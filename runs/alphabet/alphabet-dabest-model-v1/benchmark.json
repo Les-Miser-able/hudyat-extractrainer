@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "category": "alphabet",
+  "signs": 26,
+  "required_signs": 26,
+  "accuracy": 0.9877609791216703,
+  "macro_precision": 0.9885378986837152,
+  "macro_recall": 0.9878126688809535,
+  "macro_f1": 0.9880331421280812,
+  "lowest_sign_recall": 0.926829268292683,
+  "lowest_recall_signs": [
+    "M"
+  ],
+  "test_coverage_complete": true,
+  "test_samples": 1389,
+  "response_time_ms": null,
+  "timing": null,
+  "local_inference": {
+    "scope": "local_model_inference",
+    "statistic": "median",
+    "median_ms": 211.900100001003,
+    "p95_ms": 251.86384500002532,
+    "mean_ms": 205.44093333337514,
+    "min_ms": 148.95109999997658,
+    "max_ms": 254.41229999887582,
+    "samples": 30,
+    "unique_test_samples": 30,
+    "warmup": 3,
+    "batch_size": 1,
+    "device": {
+      "system": "Windows",
+      "machine": "AMD64",
+      "processor": "Intel64 Family 6 Model 154 Stepping 3, GenuineIntel",
+      "python": "3.13.13"
+    },
+    "includes": [
+      "model execution",
+      "output transfer",
+      "probability validation",
+      "top label selection"
+    ],
+    "excludes": [
+      "model loading",
+      "camera capture",
+      "hand extraction",
+      "landmark preprocessing",
+      "gesture recording",
+      "HUDYAT stability and confidence gates",
+      "UI rendering"
+    ],
+    "tensorflow_version": "2.21.0"
+  },
+  "timing_scope": null,
+  "thresholds": {
+    "accuracy": 0.85,
+    "macro_precision": 0.85,
+    "macro_recall": 0.85,
+    "macro_f1": 0.85,
+    "lowest_sign_recall": 0.7,
+    "response_time_ms": 1000
+  },
+  "checks": {
+    "accuracy": true,
+    "macro_precision": true,
+    "macro_recall": true,
+    "macro_f1": true,
+    "lowest_sign_recall": true,
+    "response_time_ms": null,
+    "sign_count": true,
+    "test_coverage": true,
+    "camera_sign_coverage": null,
+    "camera_response_completion": null
+  },
+  "status": "Incomplete",
+  "met_benchmark": null,
+  "benchmark_scope": "Held-out classification and full HUDYAT camera-to-confirmed-result timing on the test browser/device.",
+  "measured_at": "2026-10-21T04:56:45+00:00"
+}

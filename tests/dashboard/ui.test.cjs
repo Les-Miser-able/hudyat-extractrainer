@@ -985,3 +985,68 @@ test('an early or stale timeout callback cannot fail an attempt before its deadl
   assert.equal(requests.length, 1, 'the previous timer must not timeout the new trial');
   assert.notEqual(app.run('automatedTrial'), null);
 });
+
+
+test('LOSO controls choose signer holdouts and show the saved training protocol', () => {
+  const app = dashboard();
+  app.node('prepare-form').elements.validation = {disabled:false};
+  app.node('prepare-form').elements.test = {disabled:false};
+  app.node('split-strategy').value = 'loso';
+  app.node('split-strategy').handlers.change();
+  assert.equal(app.node('signer-holdouts').hidden, false);
+  assert.equal(app.node('test-signer').disabled, false);
+  assert.equal(app.node('test-signer').required, true);
+  assert.equal(app.node('prepare-form').elements.test.disabled, true);
+  app.run(`state.categories = [{name:'alphabet',datasets:[{name:'LOSO S1',path:'datasets_augmented/alphabet/loso-S1',evaluation_protocol:{strategy:'leave_one_signer_out',test_signer:'S1',validation_signer:'S2',train_signers:['S3','S4']}}]}]; renderTrainingDatasets();`);
+  assert.match(app.node('training-source').textContent, /LOSO test: S1; validation: S2; train: S3, S4/);
+  app.node('split-strategy').value = 'grouped';
+  app.run('controls()');
+  assert.equal(app.node('test-signer').disabled, true);
+  assert.equal(app.node('prepare-form').elements.test.disabled, false);
+});
+
+test('delete actions name the exact artifact, honor cancellation, and use authenticated requests', async () => {
+  const app = dashboard();
+  const requests = [];
+  app.node('data-root').value = 'data';
+  app.node('dataset-root').value = 'datasets_augmented';
+  app.run(`state.runs = [{id:'runs/colors/first',name:'first',category:'colors',class_labels:['blue'],checkpoint:true}]; selectedRun='runs/colors/first'; scan=async()=>{state.runs=[];};`);
+  app.context.window.confirm = () => false;
+  app.context.fetch = async (url, opts) => {
+    requests.push([url, JSON.parse(opts.body), opts.headers]);
+    return {ok:true, json:async()=>({ok:true,trash:'.trash/fixture'})};
+  };
+  await app.run("deleteSaved('model','runs/colors/first')");
+  assert.equal(requests.length, 0);
+  let confirmed = '';
+  app.context.window.confirm = message => { confirmed = message; return true; };
+  await app.run("deleteSaved('model','runs/colors/first')");
+  assert.match(confirmed, /runs\/colors\/first/);
+  assert.equal(requests[0][0], '/api/delete');
+  assert.equal(requests[0][1].path, 'runs/colors/first');
+  assert.equal(requests[0][1].kind, 'model');
+  assert.equal(requests[0][2]['X-Dashboard-Token'], 'test-token');
+  assert.equal(app.node('run-detail').hidden, true);
+  assert.match(app.node('notice').textContent, /Recovery folder: .trash\/fixture/);
+  assert.equal(app.run('selectedRun'), '');
+});
+
+test('delete blocks during jobs and camera use and preserves a server rejection', async () => {
+  const app = dashboard();
+  app.run("state.categories=[{name:'alphabet',datasets:[{name:'v1',path:'datasets_augmented/alphabet/v1'}]}]");
+  let calls = 0;
+  app.context.window.confirm = () => { calls++; return true; };
+  app.context.fetch = async () => ({ok:false,json:async()=>({error:'Stop the running job'})});
+  app.run("jobs=[{status:'running'}]");
+  await app.run("deleteSaved('dataset','datasets_augmented/alphabet/v1')");
+  assert.equal(calls, 0);
+  app.run("jobs=[];liveActive=true");
+  await app.run("deleteSaved('dataset','datasets_augmented/alphabet/v1')");
+  assert.equal(calls, 0);
+  app.run('liveActive=false');
+  await app.run("deleteSaved('dataset','datasets_augmented/alphabet/v1')");
+  assert.equal(calls, 1);
+  assert.equal(app.node('notice').textContent, 'Stop the running job');
+  assert.equal(app.run('submitting'), false);
+  assert.equal(app.run('state.categories[0].datasets.length'), 1);
+});

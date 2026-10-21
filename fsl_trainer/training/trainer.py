@@ -13,6 +13,8 @@ from ..data.sequences import resample
 from ..data.augmentation import augment_sequence, configuration, build_report
 from ..data.augmentation_options import add_arguments
 from ..data.source_selection import add_arguments as add_source_arguments, folder_selection, source_files
+from ..data.signer_splits import (options as split_options, signer_from_source, split_signers,
+                                  validate_protocol, add_arguments as add_split_arguments)
 from ..data.preprocessing import (IMAGE, HAND_RELATIVE, COORDINATES, augment_pose,
                                   preparation_normalization, model_normalization,
                                   add_arguments as add_preprocessing_arguments)
@@ -187,6 +189,9 @@ def split_sources(records, val_fraction, test_fraction, seed):
 
 
 def prepare(args):
+    strategy, test_signer, validation_signer = split_options(
+        getattr(args, 'split_strategy', 'grouped'), getattr(args, 'test_signer', None),
+        getattr(args, 'validation_signer', None))
     args.normalization = preparation_normalization(getattr(args, "normalization", IMAGE))
     if getattr(args, "jitter", None) is None:
         args.jitter = .03 if args.normalization == HAND_RELATIVE else .0075
@@ -227,7 +232,7 @@ def prepare(args):
         if not folder.is_dir() or folder.name.startswith("."):
             continue
         paths = ([p for p in source_files(folder, selected, videos_only) if p.suffix.lower() == ".npy"]
-                 if filtered else sorted(folder.glob("*.npy")))
+                 if filtered or strategy == 'loso' else sorted(folder.glob("*.npy")))
         if not paths:
             if filtered:
                 excluded_classes.append(folder.name)
@@ -246,12 +251,19 @@ def prepare(args):
             records.append({"source": relative, "label": folder.name,
                             "group": mapping[relative] if mapping is not None else relative,
                             "static": len(x) == 1, "sha256": fingerprint})
+            if strategy == 'loso':
+                records[-1]['signer'] = signer_from_source(relative)
     if len({r["label"] for r in records}) < 2:
         raise ValueError("Need at least two gesture class folders")
     if mapping is not None and set(mapping) != {r["source"] for r in records}:
         raise ValueError("Group CSV contains paths not present in the source dataset")
     with Stage("Assigning train / validation / test groups"):
-        assignment = split_sources(records, args.validation, args.test, args.seed)
+        if strategy == 'loso':
+            assignment, protocol = split_signers(records, test_signer, validation_signer)
+            print(f"LOSO: test {protocol['test_signer']}; validation {protocol['validation_signer']}; "
+                  f"train {', '.join(protocol['train_signers'])}. Fractions are ignored.", flush=True)
+        else:
+            assignment = split_sources(records, args.validation, args.test, args.seed)
     dest.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(args.seed)
     manifest = []
@@ -263,9 +275,10 @@ def prepare(args):
         x = load_sequence(source / record["source"])
         # Assign the source first; all synthetic siblings inherit the same split.
         relative_features = args.normalization == HAND_RELATIVE
-        count = args.static_variants if record["static"] and (not relative_features or split == "train") else 1
+        clean_evaluation = relative_features or strategy == 'loso'
+        count = args.static_variants if record["static"] and (not clean_evaluation or split == "train") else 1
         for variant in range(count):
-            synthetic = record["static"] and (not relative_features or (split == "train" and variant > 0))
+            synthetic = record["static"] and (not clean_evaluation or (split == "train" and variant > 0))
             if synthetic:
                 frame = augment_pose(x, rng) if relative_features else x
                 sequence = synthetic_sequence(frame, rng, args.jitter)
@@ -301,6 +314,12 @@ def prepare(args):
         "static_variants": args.static_variants, "jitter_std": args.jitter,
         "static_method": "repeat + independent per-timestep Gaussian coordinate noise",
         "grouping": "provided CSV" if mapping is not None else "original source file"})
+    if strategy == 'loso':
+        metadata = json.loads((dest / 'preprocessing.json').read_text(encoding='utf-8'))
+        metadata.update(evaluation_protocol=protocol, validation_fraction=None, test_fraction=None,
+                        static_method='one clean original; training-only repeat + Gaussian noise',
+                        evaluation='one unaugmented sequence per accepted source')
+        save_json(dest / 'preprocessing.json', metadata)
     if args.normalization == HAND_RELATIVE:
         metadata = json.loads((dest / "preprocessing.json").read_text(encoding="utf-8"))
         metadata.update(normalization=HAND_RELATIVE, coordinates=COORDINATES,
@@ -332,6 +351,8 @@ def inspect_dataset(root, on_sample=None):
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
     if not manifest:
         raise ValueError("Dataset manifest is empty")
+    metadata = json.loads((root / 'preprocessing.json').read_text(encoding='utf-8')) if (root / 'preprocessing.json').is_file() else {}
+    validate_protocol(manifest, metadata.get('evaluation_protocol'))
     classes = sorted({r["label"] for r in manifest})
     if len(classes) < 2:
         raise ValueError("Need at least two gesture classes")
@@ -431,6 +452,8 @@ def train(args):
         cache, manifest, classes, stats = open_cache(root)
     else:
         manifest, classes, stats = inspect_dataset(root)
+    preprocessing = json.loads((root / 'preprocessing.json').read_text(encoding='utf-8'))
+    validate_protocol(manifest, preprocessing.get('evaluation_protocol'))
     tf = tensorflow()
     tf.keras.utils.set_random_seed(args.seed)
     label_ids = {label: i for i, label in enumerate(classes)}
@@ -465,6 +488,8 @@ def train(args):
     config = {k: v for k, v in vars(args).items() if k != "func"}
     config["tensorflow_version"] = tf.__version__
     config["split_counts"] = stats
+    if preprocessing.get('evaluation_protocol'):
+        config['evaluation_protocol'] = preprocessing['evaluation_protocol']
     save_json(output / "training_config.json", config)
     (output / "preprocessing.json").write_text(
         (root / "preprocessing.json").read_text(encoding="utf-8"), encoding="utf-8")
@@ -609,6 +634,7 @@ def main():
     prep = sub.add_parser("prepare", help="Split original sources, resample videos, synthesize grouped image variants")
     add_arguments(prep)
     add_source_arguments(prep)
+    add_split_arguments(prep)
     add_preprocessing_arguments(prep)
     prep.add_argument("--source", required=True)
     prep.add_argument("--output", required=True)

@@ -7,15 +7,34 @@
     "left_present",
     "right_present"
   ],
-  "coordinates": "MediaPipe image landmarks: x/width, y/height, wrist-relative z at x scale",
+  "coordinates": "landmarks 1-20: per-frame wrist-relative pixels / pixel palm length; landmark 0: wrist displacement from first valid frame / median pixel palm length",
   "interpolation": "linear coordinates, nearest binary flags, absent coordinates zeroed",
   "seed": 42,
   "validation_fraction": 0.15,
   "test_fraction": 0.15,
   "static_variants": 8,
-  "jitter_std": 0.0075,
-  "static_method": "repeat + independent per-timestep Gaussian coordinate noise",
+  "jitter_std": 0.03,
+  "static_method": "one clean original; training-only repeat + Gaussian noise in palm lengths",
   "grouping": "source path with Roboflow .rf. siblings grouped",
+  "normalization": "hand-relative-sequence-v1",
+  "pose_augmentation": {
+    "split": "train",
+    "rotation_degrees": 15.0,
+    "mirror_probability": 0.5
+  },
+  "evaluation": "one unaugmented sequence per accepted source",
+  "video_augmentation": {
+    "version": 2,
+    "algorithm": "piecewise_linear_timing_with_hand_mirroring",
+    "eligible_inputs": "videos_and_multi_frame_landmarks",
+    "split": "train",
+    "extra_samples": 8,
+    "max_displacement": 0.09,
+    "seed": 42,
+    "max_attempts_per_sample": 10,
+    "mirror_hands": true,
+    "mirror_normalization": "hand-relative-sequence-v1"
+  },
   "extraction": {
     "backend": "MediaPipe HandLandmarker",
     "mediapipe_version": "1.0.1",

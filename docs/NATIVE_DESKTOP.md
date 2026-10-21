@@ -107,3 +107,14 @@ tests are skipped in environments that have not installed the desktop requiremen
 
 For the previous browser dashboard only, run `dashboard.py --browser --port 8090`.
 The browser mode remains independent of the Qt dependency.
+
+## Signer holdouts and deletion
+
+The extraction inspector includes **Signer evaluation**. Choose **Leave one signer
+out**, a test signer, and an optional validation signer from the signer subfolders.
+The Trainer displays the selected dataset's saved fold and audits it before use.
+See [LOSO preparation and training](LEAVE_ONE_SIGNER_OUT.md).
+
+Use **Delete selected model…** in the model inspector or **Delete selected
+dataset…** in Run configuration. The confirmation shows the exact path; files move
+to recoverable `.trash/`. See [deletion and recovery](DELETING_SAVED_ARTIFACTS.md).

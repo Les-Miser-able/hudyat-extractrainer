@@ -72,3 +72,4 @@ git
 
 # Rebuild paper figures and tables from saved evidence.
 /reports/paper/
+/.trash/

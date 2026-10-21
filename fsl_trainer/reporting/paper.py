@@ -240,6 +240,91 @@ def dataset_counts(manifest):
     return {key: counts(value) for key, value in groups.items()}
 
 
+def add_signer_report(report, manifest, protocol):
+    if not protocol:
+        return
+    report.settings(protocol, 'Leave-one-signer-out evaluation protocol', 'evaluation_protocol')
+    signers = sorted({row.get('signer', 'Unknown') for row in manifest})
+    rows = []
+    for signer in signers:
+        local = [r for r in manifest if r.get('signer') == signer]
+        for split in SPLITS:
+            members = [r for r in local if r['split'] == split]
+            rows.append([signer, split, len({r['source'] for r in members}),
+                         sum(not r.get('synthetic', False) for r in members),
+                         sum(bool(r.get('synthetic')) for r in members), len(members)])
+    report.table('signer_splits', 'Sources and augmentation by signer and split',
+                 ['Signer', 'Split', 'Original sources', 'Clean outputs', 'Synthetic outputs', 'Total outputs'], rows)
+    report.chart('signer_splits', 'Original sources by signer and split', signers,
+                 {split: [next(r[2] for r in rows if r[0] == s and r[1] == split) for s in signers]
+                  for split in SPLITS}, 'Original sources')
+    labels = sorted({r['label'] for r in manifest})
+    coverage = [[len({r['source'] for r in manifest if r.get('signer') == s and r['label'] == label})
+                 for s in signers] for label in labels]
+    report.table('signer_coverage', 'Original sources per signer and gesture', ['Sign', *signers],
+                 [[label, *values] for label, values in zip(labels, coverage)])
+    report.chart('signer_coverage', 'Original sources per signer and gesture', labels,
+                 {s: [values[i] for values in coverage] for i, s in enumerate(signers)}, 'Original sources')
+    from ..data.signer_splits import validate_protocol
+    try:
+        validate_protocol(manifest, protocol)
+    except (ValueError, KeyError, TypeError) as error:
+        report.note('Signer isolation audit failed: ' + str(error))
+        valid = False
+    else:
+        valid = True
+    report.table('signer_isolation', 'Signer isolation and clean evaluation audit', ['Audit', 'Passed'],
+                 [['Recorded LOSO protocol matches all manifest rows', valid]])
+
+
+def save_loso_report(folds, output):
+    """Summarize a complete signer rotation, with no aggregate for incomplete runs."""
+    from statistics import mean, stdev
+    report = Report(output, 'Leave-one-signer-out cross-validation',
+                    'Each fold uses a fresh model, one held-out test signer, and a separate validation signer. '
+                    'Aggregate scores give every test signer equal weight; SD is the sample standard deviation.')
+    rows, summaries, test_signers, expected = [], [], [], set()
+    for dataset, run in folds:
+        protocol = read_json(Path(dataset) / 'preprocessing.json', {}).get('evaluation_protocol', {})
+        metrics = read_json(Path(run) / 'test_metrics.json', {})
+        classes = read_json(Path(run) / 'classes.json', [])
+        summary = classification_summary(metrics, classes)
+        signer = protocol.get('test_signer')
+        expected.update(protocol.get('all_signers', []))
+        test_signers.append(signer)
+        summaries.append(summary)
+        rows.append([signer, protocol.get('validation_signer'), str(dataset), str(run),
+                     summary.get('test_samples'), *[summary.get(k) for k in SCORES]])
+    report.table('loso_folds', 'Held-out results by signer',
+                 ['Test signer', 'Validation signer', 'Dataset', 'Run', 'Test samples',
+                  *[name + ' (%)' for name in SCORE_NAMES]], rows, percent_columns=range(5, 5 + len(SCORES)))
+    report.chart('loso_folds', 'Held-out scores by test signer', test_signers,
+                 {name: [summary.get(key) for summary in summaries] for key, name in zip(SCORES, SCORE_NAMES)},
+                 'Score', ratio=True)
+    complete = (len(test_signers) >= 3 and len(set(test_signers)) == len(test_signers)
+                and set(test_signers) == expected and all(
+                    s.get('test_coverage_complete') is True and all(numeric(s.get(key)) for key in SCORES)
+                    for s in summaries))
+    if complete:
+        aggregates = [[name, len(summaries), mean(s[key] for s in summaries), stdev(s[key] for s in summaries)]
+                      for key, name in zip(SCORES, SCORE_NAMES)]
+        report.table('loso_summary', 'Scores across all held-out signers',
+                     ['Metric', 'Folds', 'Mean (%)', 'Sample SD (percentage points)'], aggregates, percent_columns=(2, 3))
+        report.chart('loso_summary', 'Mean scores across held-out signers', list(SCORE_NAMES),
+                     {'Mean': [row[2] for row in aggregates]}, 'Mean score', ratio=True)
+        report.chart('loso_variation', 'Score variation across held-out signers', list(SCORE_NAMES),
+                     {'Sample SD': [row[3] for row in aggregates]}, 'Score standard deviation', ratio=True)
+    else:
+        for stem, extensions in (('loso_summary', ('csv', 'png', 'svg')), ('loso_variation', ('png', 'svg'))):
+            for extension in extensions:
+                (report.output / f'{stem}.{extension}').unlink(missing_ok=True)
+        report.note('The signer rotation or its saved evaluation metrics are incomplete. '
+                    'An overall LOSO mean and standard deviation are not reported.')
+    report.settings({'complete': complete, 'expected_test_signers': sorted(expected), 'recorded_test_signers': test_signers},
+                    'Cross-validation coverage', 'loso_coverage')
+    return report.finish()
+
+
 def save_dataset_report(root, output=None, manifest=None, *, tables_only=False):
     root = Path(root)
     manifest = read_json(root / 'manifest.json') if manifest is None else manifest
@@ -250,6 +335,7 @@ def save_dataset_report(root, output=None, manifest=None, *, tables_only=False):
                     'Counts are derived from the saved manifest. Originals are accepted source files; '
                     'source groups can contain multiple related files. Output sequences include augmentation.', tables_only=tables_only)
     fields = ('originals', 'groups', 'static', 'sequence', 'clean', 'synthetic', 'outputs')
+    add_signer_report(report, manifest, read_json(root / 'preprocessing.json', {}).get('evaluation_protocol'))
     headers = ['Original sources', 'Source groups', 'Static sources', 'Video / sequence sources',
                'Clean output sequences', 'Synthetic output sequences', 'Total output sequences']
     total = counts['all', 'all']
@@ -430,6 +516,8 @@ def save_model_report(root, output=None, tests=None, *, tables_only=False):
                     'Local inference, trainer camera measurements, and HUDYAT camera measurements have separate scopes.', tables_only=tables_only)
     if not metrics:
         report.note('Held-out test metrics have not been saved for this run.')
+    add_signer_report(report, read_json(root / 'split_manifest.json', []),
+                     read_json(root / 'preprocessing.json', {}).get('evaluation_protocol'))
     add_classification(report, metrics, classes)
     report.matrix('confusion_matrix', 'Held-out test confusion matrix', classes,
                   metrics.get('confusion_matrix_rows_true_columns_predicted', []))

@@ -49,6 +49,7 @@ any missing figures. Use the normal command after changing the underlying data.
 | Preparation | Original sources and source groups, static/video source counts, clean/synthetic output counts, class balance, split totals and per-sign allocations, extraction acceptance/rejection/ignored counts and rejection reasons, video augmentation requests/shortfalls, and split identity overlap. |
 | Recording quality | Mean decoded frames, mean decoded video duration (frames/FPS), and detected/decoded frame fraction by sign, when extraction metadata exists. |
 | Opposite-hand augmentation | When enabled, requested/generated/unfilled timing and mirror counts, mirrored clean/timing sequences by sign, and mirror counts by split. |
+| Signer evaluation | LOSO protocol, source/output counts by signer and split, original-source coverage by signer/gesture, and isolation audit. All-fold training adds per-signer scores and equal-weight mean/sample-SD tables and figures. |
 | Training | Training/validation accuracy and loss curves with epoch tables, epoch durations, and a summary of the lowest recorded validation loss. |
 | Offline evaluation | Aggregate and per-sign classification scores, support, and count/row-percentage confusion matrices. |
 | Timing | Saved local inference statistics, each saved HUDYAT camera session, and each automated trainer live session; individual trial response times and all outcome counts remain separate. |

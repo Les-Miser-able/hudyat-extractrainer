@@ -1,7 +1,7 @@
 {
   "command": "train",
-  "dataset": "C:\\Users\\Russel\\Desktop\\trainer\\datasets_augmented\\alphabet\\alphabet-prototype1",
-  "output": "C:\\Users\\Russel\\Desktop\\trainer\\runs\\alphabet\\alphabet-prototype1-MODEL",
+  "dataset": "C:\\Users\\Russel\\Desktop\\trainer\\datasets_augmented\\alphabet\\alphabet-dabest-dataset-v1",
+  "output": "C:\\Users\\Russel\\Desktop\\trainer\\runs\\alphabet\\alphabet-dabest-model-v1",
   "epochs": 100,
   "batch_size": 32,
   "learning_rate": 0.001,
@@ -22,7 +22,7 @@
       "G": 2448,
       "H": 2200,
       "I": 2368,
-      "J": 279,
+      "J": 558,
       "K": 2488,
       "L": 2360,
       "M": 1704,
@@ -38,7 +38,7 @@
       "W": 2400,
       "X": 2320,
       "Y": 2408,
-      "Z": 279
+      "Z": 558
     },
     "test": {
       "A": 47,

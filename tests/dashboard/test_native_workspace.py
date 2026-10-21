@@ -129,6 +129,62 @@ class NativeWorkspaceTests(unittest.TestCase):
         self.assertTrue(request['video_mirror_hands'])
         self.assertIn('--video-mirror-hands', server.build_command(request))
 
+    def test_native_signer_controls_forward_holdouts_and_training_displays_protocol(self):
+        from fsl_trainer.dashboard import server
+        for gesture in ('A', 'B'):
+            for signer in ('S1', 'S2', 'S3'):
+                folder = self.root / 'data/alphabet' / gesture / signer
+                folder.mkdir()
+                (folder / 'clip.mp4').touch()
+        self.window.refresh()
+        self.wait_for(lambda: not self.window.scanning)
+        fields = self.window.prepare_fields
+        fields['split_strategy'].setCurrentIndex(fields['split_strategy'].findData('loso'))
+        fields['test_signer'].setCurrentIndex(fields['test_signer'].findData('S1'))
+        fields['validation_signer'].setCurrentIndex(fields['validation_signer'].findData('S3'))
+        self.assertFalse(fields['test'].isEnabled())
+        self.assertTrue(fields['test_signer'].isEnabled())
+        # The source selection excludes the existing direct image fixtures.
+        fields['source_folders'].setText('S1,S2,S3')
+        fields['dataset_name'].setText('loso-S1')
+        with patch.object(self.jobs, 'start', return_value='loso-job') as start:
+            self.window.prepare()
+            self.wait_for(lambda: start.called and not self.window.tasks)
+            request = start.call_args.args[0]
+        command = server.build_command(request)
+        self.assertEqual(command[command.index('--test-signer') + 1], 'S1')
+        self.assertEqual(command[command.index('--validation-signer') + 1], 'S3')
+        fields['split_strategy'].setCurrentIndex(0)
+        with patch.object(self.window, 'request_job') as job:
+            self.window.prepare()
+        self.assertNotIn('test_signer', job.call_args.args[0])
+        protocol = {'strategy': 'leave_one_signer_out', 'test_signer': 'S1',
+                    'validation_signer': 'S3', 'train_signers': ['S2']}
+        (self.dataset / 'preprocessing.json').write_text(json.dumps({'evaluation_protocol': protocol}))
+        self.window.refresh()
+        self.wait_for(lambda: not self.window.scanning)
+        self.assertIn('LOSO test: S1', self.window.dataset_protocol.text())
+        self.assertIn('validation: S3', self.window.dataset_protocol.text())
+
+    def test_native_delete_requires_confirmation_and_refreshes_saved_choices(self):
+        from PySide6.QtWidgets import QMessageBox
+        with patch.object(QMessageBox, 'question', return_value=QMessageBox.StandardButton.No):
+            self.window.delete_model()
+        self.assertTrue(self.run.exists())
+        with patch.object(QMessageBox, 'question', return_value=QMessageBox.StandardButton.Yes):
+            self.window.delete_model()
+            self.wait_for(lambda: not self.window.job_starting and not self.window.scanning and not self.window.tasks)
+        self.assertFalse(self.run.exists())
+        self.assertEqual(self.window.run_table.rowCount(), 0)
+        self.assertEqual(self.window.predict_run.count(), 0)
+        self.assertEqual(self.window.run_detail.toPlainText(), '')
+        with patch.object(QMessageBox, 'question', return_value=QMessageBox.StandardButton.Yes):
+            self.window.delete_dataset()
+            self.wait_for(lambda: not self.window.job_starting and not self.window.scanning and not self.window.tasks)
+        self.assertFalse(self.dataset.exists())
+        self.assertEqual(self.window.train_fields['dataset'].count(), 0)
+        self.assertTrue((self.root / 'data/alphabet/A/0.jpg').exists())
+
     def test_saved_run_curves_and_review_preserve_checkpoint(self):
         window = self.window
         before = (self.run / 'best.keras').read_bytes()

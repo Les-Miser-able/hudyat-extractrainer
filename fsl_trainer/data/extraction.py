@@ -193,6 +193,14 @@ def prepare_media(args, prepare_landmarks):
         print(f"Selected {len(all_files)} source files. Omitted gestures with no matching files: "
               f"{', '.join(excluded_classes) or 'none'}", flush=True)
     mapping = None
+    from .signer_splits import signer_from_source, split_signers
+    loso = getattr(args, 'split_strategy', 'grouped') == 'loso'
+    if loso:
+        # Validate identities and class coverage before running the hand detector.
+        split_signers([{'source': p.relative_to(source).as_posix(), 'label': p.relative_to(source).parts[0],
+                        'group': p.relative_to(source).as_posix(),
+                        'signer': signer_from_source(p.relative_to(source).as_posix())} for p in all_files],
+                      getattr(args, 'test_signer', None), getattr(args, 'validation_signer', None))
     if args.groups:
         with open(args.groups, newline="", encoding="utf-8-sig") as handle:
             rows = list(csv.DictReader(handle))
@@ -241,6 +249,9 @@ def prepare_media(args, prepare_landmarks):
                         raise ValueError(f"Duplicate landmark sequence of {previous}")
                     fingerprints[fingerprint] = original
                     staged = Path(original).parts[0] + "/" + hashlib.sha256(original.encode()).hexdigest() + ".npy"
+                    if loso:
+                        staged = Path(original).parts[0] + '/' + signer_from_source(original) + '/' + Path(staged).name
+                        (stage / staged).parent.mkdir(parents=True, exist_ok=True)
                     np.save(stage / staged, x, allow_pickle=False)
                     provenance[staged] = original
                     groups.append([staged, mapping[original] if mapping else default_group(original)])

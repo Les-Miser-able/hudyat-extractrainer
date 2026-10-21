@@ -9,6 +9,8 @@ from .augmentation_options import add_arguments, extra_samples, time_warp, mirro
 from .source_selection import add_arguments as add_source_arguments, folder_selection, source_files
 from ..paths import PROJECT_ROOT
 from .dataset_paths import dataset_name, select_dataset
+from .signer_splits import (add_arguments as add_split_arguments, command_options as split_command_options,
+                            signer_from_source, split_signers, fold_datasets)
 from .preprocessing import IMAGE, HAND_RELATIVE, preparation_normalization, add_arguments as add_preprocessing_arguments
 from .source_selection import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 
@@ -40,6 +42,59 @@ def inventory(root):
 
 
 def build_jobs(args):
+    if getattr(args, 'report_only', False) and not getattr(args, 'loso_all', False):
+        raise ValueError('--report-only requires --loso-all.')
+    if not getattr(args, 'loso_all', False):
+        return _build_jobs(args)
+    if getattr(args, 'test_signer', None) or getattr(args, 'validation_signer', None):
+        raise ValueError('--loso-all rotates test/validation signers automatically; omit explicit signer holdouts.')
+    if getattr(args, 'resume_from', None):
+        raise ValueError('--loso-all trains a fresh model per fold; checkpoints cannot be shared across folds.')
+    preparing = args.command == 'prepare'
+    root = Path(args.data if preparing else args.datasets).resolve()
+    available = discover(root)
+    selected = list(dict.fromkeys(args.category)) if args.category else available
+    if set(selected) - set(available):
+        raise ValueError('Unknown categories: ' + ', '.join(sorted(set(selected) - set(available))))
+    name = dataset_name(getattr(args, 'dataset_name', None) or 'prepared_v1')
+    jobs, skipped = [], []
+    for category in selected:
+        if preparing:
+            records = []
+            source = root / category
+            for folder in sorted(source.iterdir()):
+                if not folder.is_dir() or folder.name.startswith('.'):
+                    continue
+                for path in source_files(folder, getattr(args, 'source_folders', None), getattr(args, 'videos_only', False)):
+                    relative = path.relative_to(source).as_posix()
+                    records.append({'source': relative, 'label': folder.name, 'group': relative,
+                                    'signer': signer_from_source(relative)})
+            if not records and not args.category:
+                skipped.append(category)
+                continue
+            signers = sorted({r['signer'] for r in records})
+            if not signers:
+                raise ValueError(f'{category}: no signer recordings found.')
+            for signer in signers:
+                split_signers(records, signer)
+            versions = [(f'{name}-loso-{signer}', signer) for signer in signers]
+        else:
+            versions = [(p.name, p.name[len(name + '-loso-'):]) for p in fold_datasets(root / category, name)]
+        for version, signer in versions:
+            fold = argparse.Namespace(**vars(args))
+            fold.category, fold.dataset_name, fold.loso_all = [category], version, False
+            if preparing:
+                fold.split_strategy, fold.test_signer, fold.validation_signer = 'loso', signer, None
+            else:
+                fold.run = category_name(args.run + '-loso-' + signer)
+            new_jobs, _ = _build_jobs(fold)
+            jobs.extend((f'{category} / test {signer}', target, command) for _, target, command in new_jobs)
+    if not jobs:
+        raise ValueError('No populated signer categories found.')
+    return jobs, skipped
+
+
+def _build_jobs(args):
     preparing = args.command == "prepare"
     version = getattr(args, "dataset_name", "prepared_v1" if preparing else None)
     if preparing or (version is not None and version != "."):
@@ -73,7 +128,7 @@ def build_jobs(args):
             skipped.append(name)
             continue
         target = target_root / name / version if preparing else target_root / name / args.run
-        if target.exists() and (not target.is_dir() or any(target.iterdir())):
+        if not getattr(args, 'report_only', False) and target.exists() and (not target.is_dir() or any(target.iterdir())):
             raise ValueError(f"Output already contains data: {target}. "
                              "Choose another --dataset-name or --run name.")
         command = [sys.executable, "-B", str(BASE / "trainer.py")]
@@ -89,6 +144,7 @@ def build_jobs(args):
                         "--validation", str(args.validation), "--test", str(args.test),
                         "--seed", str(args.seed), "--static-variants", str(args.static_variants),
                         "--jitter", str(jitter)]
+            command += split_command_options(args)
             if normalization != IMAGE:
                 command += ["--normalization", normalization]
             for folder in selected_folders or []:
@@ -134,7 +190,7 @@ def execute(args):
     if skipped:
         print("Skipping empty categories: " + ", ".join(skipped), flush=True)
     failures = []
-    for name, target, command in jobs:
+    for name, target, command in ([] if getattr(args, 'report_only', False) else jobs):
         print(f"\n{args.command}: {name} -> {target}", flush=True)
         # A fresh process builds a fresh model and releases its memory on exit.
         result = subprocess.run(command, check=False)
@@ -143,10 +199,18 @@ def execute(args):
             print(f"FAILED: {name}; exit code {result.returncode}", file=sys.stderr, flush=True)
         else:
             print(f"Completed: {name}", flush=True)
+    if args.command == 'train' and getattr(args, 'loso_all', False):
+        from ..reporting.paper import save_loso_report
+        for category in sorted({target.parent.name for _, target, _ in jobs}):
+            folds = [(Path(command[command.index('--dataset') + 1]), target)
+                     for _, target, command in jobs if target.parent.name == category]
+            save_loso_report(folds, BASE / 'reports' / 'paper' / 'loso' / category / args.run)
     if failures:
-        raise RuntimeError("Failed categories: " + ", ".join(failures) +
+        raise RuntimeError("Failed jobs: " + ", ".join(failures) +
                            ". Other successful outputs have been kept; retry failed categories explicitly.")
-    print(f"\nCompleted {len(jobs)} independent category jobs.", flush=True)
+    description = ('LOSO reports refreshed' if getattr(args, 'report_only', False) else
+                   f"Completed {len(jobs)} " + ('signer folds' if getattr(args, 'loso_all', False) else 'independent category jobs'))
+    print('\n' + description + '.', flush=True)
 
 
 def main():
@@ -164,9 +228,12 @@ def main():
         cmd.add_argument("--dataset-name", default="prepared_v1" if action == "prepare" else None,
                          help="Prepared folder under <datasets>/<category>; use . to train an original category-level dataset")
         cmd.add_argument("--seed", type=int, default=42)
+        cmd.add_argument('--loso-all', action='store_true',
+                         help='Prepare/train one independent fold per signer; dataset/run names get -loso-<signer> suffixes')
         if action == "prepare":
             add_arguments(cmd)
             add_source_arguments(cmd)
+            add_split_arguments(cmd)
             add_preprocessing_arguments(cmd, default="auto")
             cmd.add_argument("--data", default=str(BASE / "data"))
             cmd.add_argument("--groups-dir", help="Directory with one <category>.csv per selected category")
@@ -189,6 +256,8 @@ def main():
             cmd.add_argument("--class-weights", action="store_true")
             cmd.add_argument("--loader", choices=["packed", "files"], default="packed")
             cmd.add_argument("--resume-from", help="Existing best.keras; select exactly one category")
+            cmd.add_argument('--report-only', action='store_true',
+                             help='With --loso-all, refresh aggregate reports from saved results without training')
     args = parser.parse_args()
     try:
         if args.command == "list":

@@ -762,3 +762,15 @@ Further material: [user guide](USER_GUIDE.md),
 [repository setup](docs/REPOSITORY.md), [HUDYAT integration](integrations/hudyat/README.md),
 [FSL Pocket](pwa-sample/README.md), [gesture glossary](GLOSSARY.md), and
 [learning index](learning/README.md).
+
+### Signer holdouts and deleting saved artifacts
+
+Choose **Leave one signer out** during preparation to hold out a signer from
+`data/<category>/<gesture>/<signer>/` subfolders. Training uses the saved signer
+split automatically. Use `categories.py prepare/train --loso-all` to run every
+signer fold and save an aggregate paper report. See the
+[LOSO guide](docs/LEAVE_ONE_SIGNER_OUT.md) for requirements and commands.
+
+Both interfaces include delete controls for saved models and prepared datasets.
+They move the selected files to recoverable local trash and preserve raw recordings.
+See [deleting saved artifacts](docs/DELETING_SAVED_ARTIFACTS.md).

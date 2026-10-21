@@ -368,6 +368,8 @@ class StudioWindow(QMainWindow):
             "confidence": decimal(.5), "videos_only": QCheckBox("Use videos only"),
             "swap_hands": QCheckBox("Swap left / right slots"),
             "source_folders": QLineEdit(), "groups": QLineEdit(),
+            'split_strategy': choice([('Source groups', 'grouped'), ('Leave one signer out', 'loso')]),
+            'test_signer': QComboBox(), 'validation_signer': QComboBox(),
             "video_extra_samples": spin(0, 0, 1000), "video_time_warp": decimal(.05, 0, .5),
             'video_mirror_hands': QCheckBox('Add opposite-hand video copies'),
             "seed": spin(42, 0, 2147483647), "hand_model": QLineEdit(),
@@ -394,6 +396,14 @@ class StudioWindow(QMainWindow):
             ("Video time warp", self.prepare_fields["video_time_warp"]), ("Random seed", self.prepare_fields["seed"]),
             ('', self.prepare_fields['video_mirror_hands']),
             ("Source subfolders (comma separated)", self.prepare_fields["source_folders"]), ("Group CSV (project path)", self.prepare_fields["groups"])]))
+        layout.addWidget(form_group('Signer evaluation', [('Split strategy', self.prepare_fields['split_strategy']),
+            ('Held-out test signer', self.prepare_fields['test_signer']),
+            ('Validation signer', self.prepare_fields['validation_signer'])]))
+        layout.addWidget(label('LOSO reads gesture/signer/recording subfolders. Use at least three signers. '
+            'Fractions are ignored; validation and test contain clean sources only. '
+            'Prepare one named dataset per held-out signer.', muted=True))
+        self.prepare_fields['split_strategy'].currentIndexChanged.connect(self.split_strategy_changed)
+        self.split_strategy_changed()
         self.prepare_button = button("Extract & prepare dataset", self.prepare, True)
         layout.addWidget(self.prepare_button)
         layout.addWidget(form_group("Project folders", [("Source root (project path)", self.source_root),
@@ -416,16 +426,21 @@ class StudioWindow(QMainWindow):
             ("Early stopping patience", self.train_fields["patience"]), ("Random seed", self.train_fields["seed"]),
             ("", self.train_fields["class_weights"])]))
         layout.addWidget(label("Input: 32 frames × 128 features\nBest checkpoint and reports are saved automatically.", muted=True))
+        self.dataset_protocol = label('', muted=True)
+        layout.addWidget(self.dataset_protocol)
         self.train_button = button("Start training", self.train, True)
         layout.addWidget(self.train_button)
         self.inspect_button = button("Validate selected dataset", self.inspect_dataset)
         layout.addWidget(self.inspect_button)
         layout.addWidget(button("Build dataset tables and charts", self.build_dataset_report))
         layout.addWidget(button("Open dataset tables and charts", self.open_dataset_report))
+        self.delete_dataset_button = button('Delete selected dataset…', self.delete_dataset)
+        layout.addWidget(self.delete_dataset_button)
         layout.addWidget(label("Stop keeps partial outputs. Continue a checkpoint into a new run with the trainer CLI.", muted=True))
         layout.addStretch()
         self.add_inspector(train)
         self.train_fields["category"].currentIndexChanged.connect(self.datasets_changed)
+        self.train_fields['dataset'].currentIndexChanged.connect(self.dataset_protocol_changed)
 
         model, layout = page()
         layout.setContentsMargins(12, 8, 12, 12)
@@ -444,6 +459,8 @@ class StudioWindow(QMainWindow):
         layout.addWidget(button("Run benchmark", lambda: self.model_job("benchmark")))
         layout.addWidget(button("Export model record JSON…", self.export_record))
         layout.addWidget(button("Open run folder", self.open_run_folder))
+        self.delete_model_button = button('Delete selected model…', self.delete_model)
+        layout.addWidget(self.delete_model_button)
         layout.addWidget(label("Export and benchmark jobs appear in Output / Jobs. Saved prediction tests are included in the model record.", muted=True))
         layout.addStretch()
         self.add_inspector(model)
@@ -674,10 +691,30 @@ class StudioWindow(QMainWindow):
         row = next((r for r in self.categories if r["name"] == self.prepare_fields["category"].currentData()), None)
         self.category_summary.setText(f"{len(row['classes'])} classes · {row['samples']:,} sources\n" +
             (row["preparation_issue"] or "Ready to extract and split into a new dataset.") if row else "No source categories. Import a category folder to begin.")
+        signers = sorted({s for c in row['classes'] for s in c.get('folders', {})}) if row else []
+        refill(self.prepare_fields['test_signer'], [(s, s) for s in signers])
+        refill(self.prepare_fields['validation_signer'], [('Automatic (next signer)', None), *[(s, s) for s in signers]])
+
+    def split_strategy_changed(self):
+        loso = self.prepare_fields['split_strategy'].currentData() == 'loso'
+        for key in ('test_signer', 'validation_signer'):
+            self.prepare_fields[key].setEnabled(loso)
+        for key in ('validation', 'test'):
+            self.prepare_fields[key].setEnabled(not loso)
 
     def datasets_changed(self):
         row = next((r for r in self.categories if r["name"] == self.train_fields["category"].currentData()), None)
         refill(self.train_fields["dataset"], [(d["name"], d["path"]) for d in row["datasets"]] if row else [])
+        self.dataset_protocol_changed()
+
+    def dataset_protocol_changed(self):
+        dataset = next((d for c in self.categories for d in c['datasets']
+                        if d['path'] == self.train_fields['dataset'].currentData()), None)
+        protocol = dataset.get('evaluation_protocol') if dataset else None
+        self.dataset_protocol.setText(
+            f"LOSO test: {protocol['test_signer']} · validation: {protocol['validation_signer']}\n"
+            f"Training signers: {', '.join(protocol['train_signers'])}" if protocol else
+            'Uses the selected dataset’s saved source-group split.')
 
     def open_sample(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open source sample", str(self.root / "data"),
@@ -784,6 +821,9 @@ class StudioWindow(QMainWindow):
 
     def prepare(self):
         data = self.values(self.prepare_fields)
+        if data['split_strategy'] != 'loso':
+            data.pop('test_signer', None)
+            data.pop('validation_signer', None)
         data["source_folders"] = [s.strip() for s in data["source_folders"].split(",") if s.strip()] or None
         self.request_job({**data, **self.roots(), "action": "prepare"})
 
@@ -792,6 +832,41 @@ class StudioWindow(QMainWindow):
 
     def inspect_dataset(self):
         self.request_job({**self.values(self.train_fields), **self.roots(), "action": "inspect"})
+
+    def delete_dataset(self):
+        path = self.train_fields['dataset'].currentData()
+        if not path:
+            return self.error('Choose a prepared dataset first.')
+        self.delete_saved('dataset', path)
+
+    def delete_model(self):
+        row = self.require_run()
+        if row:
+            self.delete_saved('model', row['id'])
+
+    def delete_saved(self, kind, path):
+        if self.job_starting or self.camera and self.camera.isRunning() or any(
+                j['status'] == 'running' for j in self.jobs.snapshot()):
+            return self.error('Stop the running job or camera prediction before deleting saved artifacts.')
+        if QMessageBox.question(self, f'Delete {kind}?',
+                f'Move {path} to local trash?\n\nSource recordings and other saved datasets/models stay available. '
+                'Files can be recovered from .trash in the project folder.',
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
+            return
+        self.job_starting = True
+        self.poll_jobs()
+        def finished(result):
+            self.job_starting = False
+            self.review_drafts.pop(path, None)
+            self.statusBar().showMessage('Moved to ' + result['trash'], 10000)
+            self.refresh()
+            self.poll_jobs()
+        def failed(message):
+            self.job_starting = False
+            self.poll_jobs()
+            self.error(message)
+        self.background(lambda: self.jobs.delete({'kind': kind, 'path': path, **self.roots()}), finished, failed)
 
     def build_dataset_report(self):
         dataset = self.train_fields["dataset"].currentData()
@@ -871,7 +946,8 @@ class StudioWindow(QMainWindow):
         running = next((j for j in items if j["status"] == "running"), None)
         busy = self.job_starting or bool(running) or bool(self.camera and self.camera.isRunning())
         self.stop_action.setEnabled(bool(running))
-        for control in (self.prepare_button, self.train_button, self.inspect_button, self.predict_button, self.start_action):
+        for control in (self.prepare_button, self.train_button, self.inspect_button, self.predict_button, self.start_action,
+                        self.delete_dataset_button, self.delete_model_button):
             control.setEnabled(not busy)
         job = self.last_jobs.get(self.job_select.currentData())
         if job:
@@ -933,6 +1009,10 @@ class StudioWindow(QMainWindow):
         if self.runs:
             self.run_table.selectRow(index)
             self.select_run()
+        else:
+            self.run_detail.clear()
+            self.model_caption.setText('Select a saved run.')
+            self.review_run_id = None
 
     def selected_run(self):
         index = self.run_table.currentRow()

@@ -266,6 +266,15 @@ class DashboardTests(unittest.TestCase):
 
 
 class DashboardHTTPTests(unittest.TestCase):
+    def test_delete_endpoint_requires_token_and_dispatches_validated_request(self):
+        data = {'kind': 'model', 'path': 'runs/colors/deletion-fixture'}
+        with patch.object(self.server.jobs, 'delete', return_value={'ok': True, 'trash': '.trash/fixture'}) as remove:
+            self.assertEqual(self.request('/api/delete', data)[0], 403)
+            remove.assert_not_called()
+            status, result = self.request('/api/delete', data, {'X-Dashboard-Token': 'test-token'})
+            self.assertEqual(status, 200)
+            self.assertTrue(json.loads(result)['ok'])
+            remove.assert_called_once_with(data)
     @classmethod
     def setUpClass(cls):
         # HTTP checks must not scan the developer's potentially large datasets.
