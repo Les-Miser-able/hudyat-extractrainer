@@ -77,7 +77,7 @@ class ModelRecordTests(unittest.TestCase):
             'split_counts': {'train': {'a': 9, 'b': 9}, 'test': {'a': 2, 'b': 2}}}))
         (self.run / 'preprocessing.json').write_text(json.dumps({
             'source_selection': {'folders': ['S1', 'S2'], 'selected_files': 3},
-            'video_augmentation': {'extra_samples': 8, 'max_displacement': .05}}))
+            'video_augmentation': {'extra_samples': 8, 'max_displacement': .05, 'mirror_hands': True}}))
         (self.run / 'split_manifest.json').write_text(json.dumps([
             {'source': 'a/S1/one.mp4'}, {'source': 'a/S1/one.mp4'}, {'source': 'b/S2/two.mp4'}]))
         (self.run / 'history.csv').write_text('epoch,accuracy\n0,.5\n1,.7\n')
@@ -88,6 +88,7 @@ class ModelRecordTests(unittest.TestCase):
         self.assertEqual(metadata['split_counts']['train'], 18)
         self.assertEqual(metadata['epochs_recorded'], 2)
         self.assertEqual(metadata['preparation']['video_extra_samples'], 8)
+        self.assertTrue(metadata['preparation']['video_mirror_hands'])
         self.assertEqual(metadata['input_kind'], 'Video')
 
 

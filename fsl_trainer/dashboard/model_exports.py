@@ -15,6 +15,7 @@ from .prediction_tests import export_model
 
 REQUIRED = ('best.keras', 'classes.json', 'preprocessing.json')
 OPTIONAL = ('training_config.json', 'model_summary.txt', 'history.json', 'history.csv',
+            'split_manifest.json', 'test_predictions.csv', 'video_augmentation_report.json',
             'test_metrics.json', 'benchmark.json', 'benchmark.csv', 'camera_timing.json', 'epoch_times.json', 'confusion_matrix.png',
             'confusion_matrix_normalized.png', 'confusion_matrix.csv',
             'confusion_matrix_normalized.csv')
@@ -92,6 +93,15 @@ def native_archive(base, run_id, known_runs):
                 if run not in path.resolve().parents:
                     raise ValueError('Model artifacts must stay inside their saved run.')
                 archive.write(path, name, compress_type=ZIP_STORED if name == 'best.keras' else ZIP_DEFLATED)
+            report = run / 'paper_report'
+            manifest = _read(report / 'report_manifest.json', {})
+            if manifest:
+                for name in sorted(set([*manifest.get('artifacts', []), 'report_manifest.json'])):
+                    path = report / name
+                    if path.is_file():
+                        if run not in path.resolve().parents or report.resolve() not in path.resolve().parents:
+                            raise ValueError('Paper report artifacts must stay inside their saved run.')
+                        archive.write(path, 'paper_report/' + name)
             archive.writestr('model-record.json', json.dumps(export_model(base, run_id, known_runs),
                              indent=2, ensure_ascii=False, allow_nan=False))
             archive.writestr('README.txt', 'Trained model: ' + row['category'] + ' / ' + row['name'] + '\n\n'

@@ -77,3 +77,33 @@ def augment_pose(frame, rng):
         x, y = points[:, :, 0].copy(), points[:, :, 1].copy()
         points[:, :, 0], points[:, :, 1] = c * x - s * y, s * x + c * y
     return out
+
+
+def mirror_sequence(sequence, normalization=IMAGE):
+    """Reflect a whole gesture horizontally and exchange anatomical hand slots.
+
+    Image x coordinates reflect around 0.5; wrist-relative poses and trajectories
+    reflect around zero. Timeline, depth, hand presence, and missing frames remain
+    consistent throughout the sequence. The input is never modified.
+    """
+    import numpy as np
+    normalization = preparation_normalization(normalization)
+    source = np.asarray(sequence)
+    if (source.ndim != 2 or source.shape[1] != 128 or len(source) < 1
+            or not np.issubdtype(source.dtype, np.number) or np.iscomplexobj(source)):
+        raise ValueError('Hand mirroring requires real coordinates with shape (T,128), T >= 1')
+    source = source.astype(np.float32)
+    if not np.isfinite(source).all() or not np.isin(source[:, 126:], [0, 1]).all():
+        raise ValueError('Hand mirroring requires finite coordinates and binary presence flags')
+    out = np.empty_like(source)
+    out[:, :63], out[:, 63:126] = source[:, 63:126], source[:, :63]
+    out[:, 126:] = source[:, [127, 126]]
+    for hand in range(2):
+        start, stop = hand * 63, (hand + 1) * 63
+        present = out[:, 126 + hand] == 1
+        if np.any(out[~present, start:stop] != 0):
+            raise ValueError('Hand mirroring requires zero coordinates for absent hands')
+        x = out[present, start:stop:3]
+        out[present, start:stop:3] = 1 - x if normalization == IMAGE else -x
+        out[~present, start:stop] = 0
+    return out

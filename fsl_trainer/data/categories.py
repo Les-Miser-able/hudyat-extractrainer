@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
-from .augmentation_options import add_arguments, extra_samples, time_warp
+from .augmentation_options import add_arguments, extra_samples, time_warp, mirror_hands
 from .source_selection import add_arguments as add_source_arguments, folder_selection, source_files
 from ..paths import PROJECT_ROOT
 from .dataset_paths import dataset_name, select_dataset
@@ -49,6 +49,7 @@ def build_jobs(args):
         videos_only = getattr(args, "videos_only", False)
         video_count = extra_samples(getattr(args, "video_extra_samples", 0))
         video_strength = time_warp(getattr(args, "video_time_warp", .05))
+        video_mirroring = mirror_hands(getattr(args, 'video_mirror_hands', False))
     source_root = Path(args.data if preparing else args.datasets).resolve()
     target_root = Path(args.datasets if preparing else args.runs).resolve()
     if (source_root == target_root or source_root in target_root.parents
@@ -97,6 +98,8 @@ def build_jobs(args):
             if video_count:
                 command += ["--video-extra-samples", str(video_count),
                             "--video-time-warp", str(video_strength)]
+            if video_mirroring:
+                command.append('--video-mirror-hands')
             command += ["--detection-confidence", str(getattr(args, "detection_confidence", 0.5))]
             if getattr(args, "hand_model", None):
                 command += ["--hand-model", args.hand_model]

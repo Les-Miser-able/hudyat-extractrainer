@@ -1,5 +1,5 @@
-Actual / Predicted,blue,green,orange,red
-blue,100.0,0.0,0.0,0.0
-green,0.0,85.7143,14.2857,0.0
-orange,0.0,0.0,100.0,0.0
-red,42.8571,42.8571,14.2857,0.0
+Actual / Predicted (%),blue,green,orange,red
+blue,100.00%,0.00%,0.00%,0.00%
+green,0.00%,85.71%,14.29%,0.00%
+orange,0.00%,0.00%,100.00%,0.00%
+red,42.86%,42.86%,14.29%,0.00%

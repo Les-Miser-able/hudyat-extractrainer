@@ -68,6 +68,19 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(runs[0]["accuracy"], .9)
         self.assertEqual(runs[0]["classes"], 2)
 
+    def test_paper_report_jobs_use_saved_data_without_retraining(self):
+        command = dashboard.build_command({'action': 'paper-report', 'dataset': 'datasets_augmented/alphabet'})
+        self.assertIn('paper-report', command)
+        self.assertIn(str(self.dataset), command)
+        command = dashboard.build_command({'action': 'paper-report', 'run': 'runs/alphabet/first'})
+        self.assertIn('--run', command)
+        self.assertNotIn('train', command)
+        command = dashboard.build_command({'action': 'paper-report'})
+        self.assertIn('--all', command)
+        for data in ({'dataset': '../outside'}, {'run': 'runs/alphabet/missing'}):
+            with self.assertRaises(ValueError):
+                dashboard.build_command({'action': 'paper-report', **data})
+
     def test_paths_and_invalid_parameters_are_rejected(self):
         for path in ["../outside", str(self.root.parent / "outside")]:
             with self.subTest(path=path), self.assertRaises(ValueError):
@@ -148,6 +161,13 @@ class DashboardTests(unittest.TestCase):
         request = {"action": "prepare", "dataset_name": "fresh", "category": "alphabet", "datasets": "fresh_datasets"}
         baseline = dashboard.build_command(request)
         self.assertNotIn("--video-extra-samples", baseline)
+        self.assertNotIn('--video-mirror-hands', baseline)
+        mirrored = dashboard.build_command({**request, 'video_mirror_hands': True})
+        self.assertIn('--video-mirror-hands', mirrored)
+        self.assertNotIn('--video-extra-samples', mirrored)
+        for value in (1, 0, 'true', None):
+            with self.assertRaises(ValueError):
+                dashboard.build_command({**request, 'video_mirror_hands': value})
         command = dashboard.build_command({**request, "video_extra_samples": 3, "video_time_warp": .05})
         self.assertIn("--video-extra-samples", command)
         self.assertEqual(command[command.index("--video-extra-samples") + 1], "3")
@@ -347,6 +367,19 @@ class DashboardHTTPTests(unittest.TestCase):
         self.assertIn("runs", result)
         self.assertEqual(result["token"], "test-token")
 
+    def test_paper_report_pages_and_tables_are_served_without_exposing_source_files(self):
+        from fsl_trainer.reporting.paper import Report
+        folder = Path(self.temp.name) / 'reports' / 'paper'
+        report = Report(folder, 'Study', 'Saved data')
+        report.table('counts', 'Counts', ['Name', 'Count'], [['A', 3]])
+        report.finish()
+        self.assertEqual(self.request('/paper-report/reports/paper/index.html')[0], 200)
+        status, body = self.request('/paper-report/reports/paper/counts.csv')
+        self.assertEqual(status, 200)
+        self.assertIn(b'A,3', body)
+        self.assertEqual(self.request('/paper-report/%2e%2e/outside.csv')[0], 400)
+        self.assertEqual(self.request('/paper-report/runs/prediction_tests.json')[0], 404)
+
     def test_requests_cannot_escape_or_launch_cross_origin_jobs(self):
         self.assertEqual(self.request("/%2e%2e/dashboard.py")[0], 400)
         self.assertEqual(self.request("/api/jobs", {"action": "train"})[0], 403)
@@ -478,7 +511,7 @@ class DashboardHTTPTests(unittest.TestCase):
                 self.assertIn(f'-{format}.csv', response.headers['Content-Disposition'])
                 rows = list(csv.DictReader(io.StringIO(response.read().decode('utf-8-sig'))))
             if format == 'metrics':
-                self.assertEqual(rows[0]['Accuracy'], '1.0')
+                self.assertEqual(rows[0]['Accuracy (%)'], '100.00%')
                 self.assertEqual(rows[0]['Median response (ms)'], '500.0')
                 self.assertEqual(rows[0]['Coverage complete'], 'False')
             else:

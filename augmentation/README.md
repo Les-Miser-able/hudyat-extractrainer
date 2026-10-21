@@ -52,7 +52,7 @@ and multi-frame landmark inputs produce one resampled original by default.
 Optional timing augmentation adds distinct training samples as described below.
 Existing prepared datasets are not changed automatically.
 
-## Video / sequence timing augmentation
+## Video / sequence augmentation
 
 ```powershell
 python categories.py prepare --category alphabet --datasets datasets_video_v1 --video-extra-samples 3 --video-time-warp 0.05
@@ -75,6 +75,16 @@ in the manifest, separate generated-sequence counts in the summary, and detailed
 counts/reasons in `video_augmentation_report.json`. Training retains the report
 in its run directory. Inference applies no augmentation. See the
 [feature design](../docs/design/video-augmentation.md) for the complete contract.
+
+Enable `--video-mirror-hands` or **Add opposite-hand video copies** to add paired
+opposite-hand versions of each clean training sequence and timing variant. This
+option works with zero timing extras. With N successful timing extras, the maximum
+output is `2 * (N + 1)` sequences per training source; duplicate mirrors are skipped.
+Both image and hand-relative feature conventions are supported. Originals, labels,
+source groups, and held-out sequences retain their existing values. Source IDs and
+mirrored parent variant numbers are recorded for tracing each generated sequence.
+Use only where mirrored signing has the same label, and test real left-hand signing
+after retraining. See [hand mirroring](../docs/design/hand-mirroring.md).
 
 ## Future implementation
 

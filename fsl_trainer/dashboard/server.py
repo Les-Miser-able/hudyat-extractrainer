@@ -19,7 +19,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from ..reporting.benchmark import read_benchmark, benchmark_csv
 from ..paths import PROJECT_ROOT
-from ..data.augmentation_options import extra_samples, time_warp
+from ..data.augmentation_options import extra_samples, time_warp, mirror_hands
 from ..data.source_selection import SUPPORTED, VIDEO_EXTENSIONS, source_files, folder_selection
 from ..data.dataset_paths import dataset_name, prepared_datasets, select_dataset
 from ..data.preprocessing import IMAGE, HAND_RELATIVE, preparation_normalization
@@ -176,6 +176,7 @@ def build_command(data):
             raise ValueError("videos_only must be a boolean.")
         video_count = extra_samples(data.get("video_extra_samples", 0))
         video_strength = time_warp(data.get("video_time_warp", .05))
+        video_mirroring = mirror_hands(data.get('video_mirror_hands', False))
         source = local_path(category, local_path(data.get("data", "data")))
         if not source.is_dir():
             raise ValueError("This category has no source folder.")
@@ -208,6 +209,8 @@ def build_command(data):
         if video_count:
             command += ["--video-extra-samples", str(video_count),
                         "--video-time-warp", str(video_strength)]
+        if video_mirroring:
+            command.append('--video-mirror-hands')
         for name in selected or []:
             command += ["--source-folder", name]
         if videos_only:
@@ -262,6 +265,21 @@ def build_command(data):
                    "training_config.json", "split_manifest.json")):
             raise ValueError("Benchmarking needs a checkpoint, test metrics, training config, and split manifest.")
         command += ["benchmark", "--run", str(run)]
+    elif action == "paper-report":
+        command += ["paper-report"]
+        if data.get("run"):
+            if data["run"] not in {row["id"] for row in runs()}:
+                raise ValueError("Choose an existing model run for its paper report.")
+            command += ["--run", str(local_path(data["run"]))]
+        elif data.get("dataset"):
+            from ..reporting.paper import saved_datasets
+            dataset = local_path(data["dataset"])
+            dataset_root = local_path(data.get("datasets", "datasets_augmented"))
+            if dataset not in {p.resolve() for p in saved_datasets(dataset_root)}:
+                raise ValueError("Choose an existing prepared dataset for its paper report.")
+            command += ["--dataset", str(dataset)]
+        else:
+            command += ["--all", "--datasets", str(local_path(data.get("datasets", "datasets_augmented")))]
     elif action == "export":
         run, row = saved_run(BASE, data.get("run"), runs())
         options = export_options(run)
@@ -318,10 +336,11 @@ class Jobs:
                                        errors="replace", bufsize=1,
                                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             job = {"id": job_id, "action": data["action"],
-                   "category": Path(data['run']).parent.name if data['action'] in {'export', 'benchmark', 'hudyat-timing'} else data.get("category", "prediction"),
+                   "category": Path(data['run']).parent.name if data.get('run') and data['action'] in {'export', 'benchmark', 'hudyat-timing', 'paper-report'}
+                   else data.get("category", "paper reports" if data['action'] == 'paper-report' else "prediction"),
                    "status": "running",
                    "dataset": data.get("dataset") or data.get("dataset_name"),
-                   "run": data.get("run") if data["action"] in {"predict", "export", "benchmark", "hudyat-timing"} else None,
+                   "run": data.get("run") if data["action"] in {"predict", "export", "benchmark", "hudyat-timing", "paper-report"} else None,
                    "sample": data.get("sample") if data["action"] == "predict" else None,
                    "started": datetime.now().isoformat(timespec="seconds"),
                    "command": subprocess.list2cmdline(command), "exit_code": None,
@@ -442,6 +461,19 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Content-Length", str(len(payload)))
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("X-Content-Type-Options", "nosniff")
+                self.end_headers()
+                return self.wfile.write(payload)
+            if url.path.startswith('/paper-report/'):
+                path = local_path(unquote(url.path[len('/paper-report/'):]))
+                if (not path.is_file() or not (path.parent / 'report_manifest.json').is_file()
+                        or path.name != 'index.html' and path.suffix not in {'.csv', '.png', '.svg', '.json'}):
+                    return self.reply({'error': 'Report file not found. Build the tables and charts first.'}, 404)
+                payload = path.read_bytes()
+                self.send_response(200)
+                self.send_header('Content-Type', mimetypes.guess_type(path.name)[0] or 'application/octet-stream')
+                self.send_header('Content-Length', str(len(payload)))
+                self.send_header('Cache-Control', 'no-store')
+                self.send_header('X-Content-Type-Options', 'nosniff')
                 self.end_headers()
                 return self.wfile.write(payload)
             if url.path == "/api/benchmarks/export":

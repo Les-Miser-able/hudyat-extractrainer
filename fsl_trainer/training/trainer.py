@@ -52,6 +52,10 @@ def save_augmentation_summary(root, manifest):
             for field in ("requested_extra_samples", "unfilled_extra_samples",
                           "duplicate_candidates", "invalid_candidates"):
                 result[field] = sum(item[field] for item in details)
+            if video_report['settings'].get('mirror_hands'):
+                for field in ('requested_timing_samples', 'generated_timing_samples', 'unfilled_timing_samples',
+                              'requested_mirrored_samples', 'generated_mirrored_samples', 'unfilled_mirrored_samples'):
+                    result[field] = sum(item[field] for item in details)
         return result
 
     summary = counts(manifest)
@@ -76,6 +80,10 @@ def save_augmentation_summary(root, manifest):
               f"{summary['unfilled_extra_samples']:,} unfilled.", flush=True)
         print(f"Skipped candidates: {summary['duplicate_candidates']:,} duplicate, "
               f"{summary['invalid_candidates']:,} invalid.", flush=True)
+        if 'generated_mirrored_samples' in summary:
+            print(f"Opposite-hand video copies: {summary['generated_mirrored_samples']:,} generated; "
+                  f"{summary['unfilled_mirrored_samples']:,} unfilled. "
+                  f"Timing extras: {summary['generated_timing_samples']:,} generated.", flush=True)
         for item in video_report["sources"]:
             if item["unfilled_extra_samples"]:
                 print(f"  {item['source']}: {item['generated_extra_samples']} of "
@@ -183,7 +191,9 @@ def prepare(args):
     if getattr(args, "jitter", None) is None:
         args.jitter = .03 if args.normalization == HAND_RELATIVE else .0075
     video_settings = configuration(getattr(args, "video_extra_samples", 0),
-                                   getattr(args, "video_time_warp", .05), args.seed)
+                                   getattr(args, "video_time_warp", .05), args.seed,
+                                   mirror_hands=getattr(args, 'video_mirror_hands', False),
+                                   normalization=args.normalization)
     source, dest = Path(args.source).resolve(), Path(args.output).resolve()
     if not source.is_dir():
         raise ValueError(f"Source directory not found: {source}")
@@ -270,7 +280,9 @@ def prepare(args):
         if video_settings and not record["static"] and split == "train":
             extras, detail = augment_sequence(x, record["source"], args.seed,
                                       video_settings["extra_samples"],
-                                      video_settings["max_displacement"])
+                                      video_settings["max_displacement"],
+                                      mirror_hands=video_settings.get('mirror_hands', False),
+                                      normalization=args.normalization)
             video_sources.append({**detail, "label": record["label"], "group": record["group"],
                                   "split": split})
             for variant, (sequence, transformation) in enumerate(extras, 1):
@@ -311,6 +323,8 @@ def prepare(args):
     print("Sequence generation and dataset validation complete.", flush=True)
     if not getattr(args, "_landmarks_only", False):
         save_augmentation_summary(dest, manifest)
+        from ..reporting.paper import save_dataset_report
+        save_dataset_report(dest, manifest=manifest)
 
 
 def inspect_dataset(root, on_sample=None):
@@ -543,6 +557,8 @@ def train(args):
         writer.writerow(["path", "true_class", "predicted_class", "confidence"])
         for row, probs in zip(splits["test"], probabilities):
             writer.writerow([row["path"], row["label"], classes[int(probs.argmax())], float(probs.max())])
+    from ..reporting.paper import save_model_report
+    save_model_report(output)
     print(json.dumps(report, indent=2))
 
 
@@ -632,6 +648,8 @@ def main():
     bench.add_argument("--run", required=True)
     from .benchmark import benchmark_run
     bench.set_defaults(func=benchmark_run)
+    from ..reporting.paper import add_arguments as add_report_arguments
+    add_report_arguments(sub)
     args = parser.parse_args()
     try:
         if args.command == "prepare" and args.jitter == 0:

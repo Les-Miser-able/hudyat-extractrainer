@@ -123,9 +123,11 @@ class HandRelativeTests(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                 trainer.prepare(args)
             actual = {p.relative_to(root / 'dataset').as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
-                      for p in (root / 'dataset').rglob('*') if p.is_file()}
+                      for p in (root / 'dataset').rglob('*')
+                      if p.is_file() and p.relative_to(root / 'dataset').parts[0] != 'paper_report'}
             expected = json.loads((Path(__file__).parents[1] / 'fixtures/preparation_hashes.json').read_text())
             self.assertEqual(actual, expected)
+            self.assertTrue((root / 'dataset/paper_report/index.html').is_file())
 
     @unittest.skipUnless(shutil.which('node'), 'Node.js is required for browser feature parity')
     def test_browser_and_python_preprocessing_agree(self):

@@ -42,6 +42,14 @@ datasets. Hand-relative preparation needs raw images/videos rather than supplied
 `.npy` arrays. To reproduce older alphabet preparation, select **Original image
 coordinates** or pass `--normalization image` to category preparation.
 
+For videos, enable **Add opposite-hand video copies** under dataset preparation's
+augmentation settings. This adds a mirrored training copy of each full gesture
+and each timing variant, so right-hand recordings can also provide synthetic
+left-hand examples. It works with either coordinate convention and zero timing
+extras. Only enable it when the mirrored gesture keeps the same meaning. Use a
+new dataset name, train a new model, and verify performance with real left-hand
+attempts. The dataset's paper report includes the mirrored counts by sign and split.
+
 ## 1. Open the project
 
 Open the `fsl_trainer` folder in File Explorer. Click the address bar, type
@@ -436,8 +444,9 @@ mode, and start the camera. Scroll to **Automated test recording**:
 
 The app calculates accuracy, macro precision/recall/F1, lowest gesture recall,
 per-gesture scores, and response median/p95/max. Macro metrics and lowest recall
-appear after every model gesture has at least one attempt. CSV scores use 0–1
-ratios, so 0.85 means 85%.
+appear after every model gesture has at least one attempt. CSV classification
+scores and confidence values are percentages, such as `85.00%`. Counts and
+durations keep their own units. Full JSON retains the original numeric ratios.
 
 Each attempt records its expected/recognized gesture, confidence, timing, and
 camera settings. Wrong predictions, 15-second timeouts, incomplete captures,

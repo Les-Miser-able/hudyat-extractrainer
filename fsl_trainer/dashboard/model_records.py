@@ -52,6 +52,7 @@ def run_metadata(run):
             'preparation': {'static_variants': pre.get('static_variants'), 'jitter_std': pre.get('jitter_std'),
                             'video_extra_samples': augmentation.get('extra_samples', 0),
                             'video_time_warp': augmentation.get('max_displacement'),
+                            'video_mirror_hands': augmentation.get('mirror_hands', False),
                             'detection_confidence': pre.get('extraction', {}).get('detection_confidence')}}
 
 
