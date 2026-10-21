@@ -301,6 +301,8 @@ def prepare_media(args, prepare_landmarks):
             save_augmentation_summary(output, manifest)
             report["status"] = "complete"
             save_json(output / "extraction_report.json", report)
+            from ..reporting.paper import save_dataset_report
+            save_dataset_report(output, manifest=manifest)
     except Exception as error:
         report["status"], report["error"] = "failed", str(error)
         output.parent.mkdir(parents=True, exist_ok=True)

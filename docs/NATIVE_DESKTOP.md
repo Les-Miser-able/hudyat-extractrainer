@@ -70,8 +70,12 @@ Preview mirroring is separate from data augmentation. Synthetic static training
 variants under **Hand-relative sequence** preprocessing have a 50% mirror chance,
 including left/right hand-slot and presence-flag swaps. Automatic preprocessing
 selects that convention for raw alphabet media. Clean originals and validation/test
-samples remain unmirrored. Video augmentation currently varies timing only;
-legacy image-coordinate augmentation uses jitter without mirroring. Existing
+samples remain unmirrored. **Add opposite-hand video copies** separately enables
+paired mirrored copies of complete training video sequences and timing variants,
+in either feature convention. It works with zero timing extras and defaults off.
+Only enable it for signs whose mirrored form has the same meaning, then prepare
+a new dataset and retrain. Legacy image-coordinate static augmentation uses jitter
+without mirroring. Existing
 prepared datasets and trained models are not changed by the preview toggle.
 
 Model record export includes existing saved prediction tests. The advanced

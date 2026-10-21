@@ -69,3 +69,6 @@ htmlcov/
 git
 # Downloadable model bundles
 /exports/
+
+# Rebuild paper figures and tables from saved evidence.
+/reports/paper/

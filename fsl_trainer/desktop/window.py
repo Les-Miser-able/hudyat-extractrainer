@@ -191,6 +191,8 @@ class StudioWindow(QMainWindow):
         toolbar.addAction("Import category…", self.import_source)
         self.refresh_action = toolbar.addAction("Refresh", self.refresh)
         self.refresh_action.setShortcut("F5")
+        toolbar.addAction("Build paper report", lambda: self.request_job({"action": "paper-report", **self.roots()}))
+        toolbar.addAction("Open paper report", lambda: self.open_paper_report(self.root / "reports" / "paper"))
         toolbar.addSeparator()
         self.start_action = toolbar.addAction("Start extraction", self.start_workspace_job)
         self.start_action.setShortcut("Ctrl+Return")
@@ -282,6 +284,8 @@ class StudioWindow(QMainWindow):
         actions.addWidget(button("View learning curves", self.view_run_curves))
         actions.addWidget(button("Try this model", self.use_run, True))
         actions.addWidget(button("Export benchmarks CSV…", self.export_benchmarks))
+        actions.addWidget(button("Build tables and charts", lambda: self.model_job("paper-report")))
+        actions.addWidget(button("Open tables and charts", self.open_model_report))
         layout.addLayout(actions)
         self.tabs.addTab(widget, "Model runs")
 
@@ -365,11 +369,15 @@ class StudioWindow(QMainWindow):
             "swap_hands": QCheckBox("Swap left / right slots"),
             "source_folders": QLineEdit(), "groups": QLineEdit(),
             "video_extra_samples": spin(0, 0, 1000), "video_time_warp": decimal(.05, 0, .5),
+            'video_mirror_hands': QCheckBox('Add opposite-hand video copies'),
             "seed": spin(42, 0, 2147483647), "hand_model": QLineEdit(),
         }
         self.prepare_fields["jitter"].setPlaceholderText("Automatic for feature convention")
         self.prepare_fields["source_folders"].setPlaceholderText("All folders, or S1, S2")
         self.prepare_fields["hand_model"].setPlaceholderText("Default hand detector")
+        self.prepare_fields['video_mirror_hands'].setToolTip(
+            'Adds training-only mirrored copies of videos and their timing variants. '
+            'Use only for signs whose mirrored form has the same meaning. Prepare a new dataset and retrain.')
         self.source_root, self.dataset_root = QLineEdit("data"), QLineEdit("datasets_augmented")
         extract, layout = page()
         layout.setContentsMargins(12, 8, 12, 12)
@@ -384,6 +392,7 @@ class StudioWindow(QMainWindow):
             ("Test fraction", self.prepare_fields["test"]), ("Static variants", self.prepare_fields["variants"]),
             ("Jitter", self.prepare_fields["jitter"]), ("Extra video samples", self.prepare_fields["video_extra_samples"]),
             ("Video time warp", self.prepare_fields["video_time_warp"]), ("Random seed", self.prepare_fields["seed"]),
+            ('', self.prepare_fields['video_mirror_hands']),
             ("Source subfolders (comma separated)", self.prepare_fields["source_folders"]), ("Group CSV (project path)", self.prepare_fields["groups"])]))
         self.prepare_button = button("Extract & prepare dataset", self.prepare, True)
         layout.addWidget(self.prepare_button)
@@ -411,6 +420,8 @@ class StudioWindow(QMainWindow):
         layout.addWidget(self.train_button)
         self.inspect_button = button("Validate selected dataset", self.inspect_dataset)
         layout.addWidget(self.inspect_button)
+        layout.addWidget(button("Build dataset tables and charts", self.build_dataset_report))
+        layout.addWidget(button("Open dataset tables and charts", self.open_dataset_report))
         layout.addWidget(label("Stop keeps partial outputs. Continue a checkpoint into a new run with the trainer CLI.", muted=True))
         layout.addStretch()
         self.add_inspector(train)
@@ -781,6 +792,29 @@ class StudioWindow(QMainWindow):
 
     def inspect_dataset(self):
         self.request_job({**self.values(self.train_fields), **self.roots(), "action": "inspect"})
+
+    def build_dataset_report(self):
+        dataset = self.train_fields["dataset"].currentData()
+        if not dataset:
+            return self.error("Choose a prepared dataset in Run configuration.")
+        self.request_job({"action": "paper-report", "dataset": dataset, **self.roots()})
+
+    def open_paper_report(self, folder):
+        path = folder / "index.html"
+        if not path.is_file():
+            return self.error("Build the tables and charts first. Follow progress in Output / Jobs.")
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+
+    def open_dataset_report(self):
+        dataset = self.train_fields["dataset"].currentData()
+        if not dataset:
+            return self.error("Choose a prepared dataset in Run configuration.")
+        self.open_paper_report(self.root / dataset / "paper_report")
+
+    def open_model_report(self):
+        row = self.require_run()
+        if row:
+            self.open_paper_report(self.root / row["id"] / "paper_report")
 
     def start_workspace_job(self):
         (self.prepare, self.train, self.use_run, self.predict_sample)[self.tabs.currentIndex()]()

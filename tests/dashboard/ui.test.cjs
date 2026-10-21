@@ -90,6 +90,8 @@ test('preparation submits video controls with the existing form fields', async (
     return {ok: false, json: async () => ({error: 'Fixture rejection'})};
   };
   const form = app.node('prepare-form');
+  form.querySelectorAll = selector => selector === '[type="checkbox"][name]'
+    ? [{name: 'video_mirror_hands', checked: true}] : [];
   form.handlers.submit({preventDefault() {}, currentTarget: form});
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(requests.length, 1);
@@ -97,6 +99,7 @@ test('preparation submits video controls with the existing form fields', async (
   assert.equal(requests[0].dataset_name, 'custom preparation');
   assert.equal(requests[0].video_extra_samples, '3');
   assert.equal(requests[0].video_time_warp, '0.05');
+  assert.equal(requests[0].video_mirror_hands, true);
   assert.equal(requests[0].seed, '42');
   assert.equal(requests[0].normalization, 'hand-relative-sequence-v1');
 });
@@ -177,6 +180,25 @@ test('validation buttons submit their own dataset path', async () => {
   assert.equal(requests[0].action, 'inspect');
   assert.equal(requests[0].category, 'alphabet');
   assert.equal(requests[0].dataset, 'datasets_augmented/alphabet/v2');
+});
+
+test('paper report controls submit dataset and model paths without starting training', async () => {
+  for (const [selector, dataset, expected] of [
+    ['[data-paper-report-dataset]', {paperReportDataset: 'datasets_augmented/alphabet/v2'}, {dataset: 'datasets_augmented/alphabet/v2'}],
+    ['[data-paper-report-run]', {paperReportRun: 'runs/alphabet/v2'}, {run: 'runs/alphabet/v2'}],
+    ['[data-paper-report-all]', {}, {}]
+  ]) {
+    const app = dashboard();
+    const requests = [];
+    app.context.fetch = async (url, options) => {
+      if (options?.method === 'POST') requests.push(JSON.parse(options.body));
+      return {ok: false, json: async () => ({error: 'Fixture rejection'})};
+    };
+    app.documentHandlers.click({target: {closest: value => value === selector ? {dataset} : null}});
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(requests[0].action, 'paper-report');
+    for (const [key, value] of Object.entries(expected)) assert.equal(requests[0][key], value);
+  }
 });
 
 test('folder choices update preview and are submitted without PUB', async () => {

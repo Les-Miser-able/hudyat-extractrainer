@@ -5,12 +5,11 @@ import json
 from pathlib import Path
 
 import numpy as np
+from .formatting import percentage
 
 
-def save_confusion_matrix(report, output):
-    from matplotlib.figure import Figure
-    from matplotlib.backends.backend_agg import FigureCanvasAgg
-
+def save_confusion_tables(report, output):
+    """Refresh count and percentage CSV tables without redrawing figures."""
     output = Path(output)
     classes = report['classes']
     counts = np.asarray(report['confusion_matrix_rows_true_columns_predicted'], dtype=int)
@@ -24,9 +23,21 @@ def save_confusion_matrix(report, output):
         stem = output / ('confusion_matrix' + suffix)
         with stem.with_suffix('.csv').open('w', newline='', encoding='utf-8') as handle:
             writer = csv.writer(handle)
-            writer.writerow(['Actual / Predicted', *classes])
+            writer.writerow(['Actual / Predicted' + (' (%)' if normalized else ''), *classes])
             for label, row in zip(classes, values):
-                writer.writerow([label, *[round(float(v), 4) if normalized else int(v) for v in row]])
+                writer.writerow([label, *[percentage(float(v), scale=1) if normalized else int(v) for v in row]])
+    return classes, counts, percentages
+
+
+def save_confusion_matrix(report, output):
+    from matplotlib.figure import Figure
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+
+    output = Path(output)
+    classes, counts, percentages = save_confusion_tables(report, output)
+    n = len(classes)
+    for suffix, values, normalized in [('', counts, False), ('_normalized', percentages, True)]:
+        stem = output / ('confusion_matrix' + suffix)
         size = max(8, n * 0.43 + 3)
         figure = Figure(figsize=(size, size), layout='constrained')
         FigureCanvasAgg(figure)

@@ -301,8 +301,9 @@ to image coordinates; select hand-relative features explicitly as shown above.
 default, or set `--jitter` in that profile's units. Static poses repeat for
 32 timesteps; noise affects only present-hand coordinates. Legacy image-coordinate
 augmentation uses independent Gaussian noise without rotation or mirroring.
-Mirroring currently applies to the synthetic static hand-relative variants;
-multi-frame video augmentation varies timing without mirroring.
+Static hand-relative variants use random mirroring. Videos can separately gain
+paired opposite-hand copies with **Add opposite-hand video copies** or
+`--video-mirror-hands`, in either coordinate convention.
 
 Hand-relative features convert XYZ to pixel units using width/height, center
 landmarks 1–20 on the wrist, and scale them by each frame's pixel palm length
@@ -336,6 +337,22 @@ Motionless or sparsely detected sources can yield fewer distinct extras.
 shortfalls. The manifest stores time maps; training copies the report into the
 run. See the [augmentation design](docs/design/video-augmentation.md) and
 [augmentation workspace guide](augmentation/README.md).
+
+Enable **Add opposite-hand video copies** in dataset preparation to learn from
+mirrored versions of right- or left-hand recordings. It is off by default and
+also works with zero timing extras. With three valid timing extras, a training
+video produces up to eight sequences: four in its original orientation and four
+mirrored. Hand slots and presence flags are swapped across the entire gesture;
+the label and source group remain the same. Validation/test inputs are not mirrored.
+
+```powershell
+.\.venv\Scripts\python.exe categories.py prepare --category colors --dataset-name both_hands_v1 --video-mirror-hands --video-extra-samples 3
+```
+
+Use this option only when the mirrored gesture retains its meaning. Prepare a
+new dataset and train a new model; confirm recognition with actual left- and
+right-hand test attempts. [Mirroring details](docs/design/hand-mirroring.md)
+include provenance, duplicate handling, and automatically generated paper tables/charts.
 
 All prepared samples are `float32` with shape `(32,128)`. Video coordinates use
 uniform linear interpolation over the full recording, preserving endpoints;
@@ -402,6 +419,12 @@ with an approximate remaining time. The loaded optimizer's learning rate is
 recorded in `training_config.json`.
 
 ### Saved run artifacts
+
+Dataset preparation and completed model runs now save paper tables and charts in
+`paper_report/index.html` beside their artifacts (CSV tables, PNG/SVG figures).
+Use **Build paper report** in the desktop toolbar for all saved data, then **Open
+paper report**. See [paper reporting](docs/PAPER_REPORTS.md) for dataset, model,
+live-test, and comparison reports and the command for rebuilding existing results.
 
 Runs live in `runs/<category>/<run name>/`:
 
@@ -533,7 +556,8 @@ measured confirmation/rendering benchmark remains separate.
 Choose **Finish session** when done. **Download metrics CSV** includes session
 and per-gesture measurements; **Download trials CSV** includes individual
 attempts. Both are also available under **Model runs → Prediction test runs**.
-CSV scores are ratios from 0 to 1; missing measurements are empty cells. The full
+CSV classification scores and confidence values include a `%` sign, such as `85.00%`;
+missing measurements are empty cells. The full
 JSON additionally retains probabilities, the confusion matrix, browser/camera
 details, and the frozen model snapshot. Camera images/videos are not stored.
 Each completed attempt is written atomically. A failed save keeps the attempt

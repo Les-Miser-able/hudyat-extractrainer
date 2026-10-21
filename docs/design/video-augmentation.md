@@ -1,5 +1,9 @@
 # Video augmentation design
 
+This describes the original timing-only augmentation (version 1). The optional
+[opposite-hand mirroring extension](hand-mirroring.md) uses version 2 when enabled;
+leaving it off preserves the version 1 settings and outputs.
+
 Status: implemented and verified. The feature follows the confirmed scope and
 contract below. Verification results are recorded in [VALIDATION.md](../VALIDATION.md).
 

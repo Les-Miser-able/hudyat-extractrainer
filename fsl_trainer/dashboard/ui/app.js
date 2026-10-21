@@ -137,7 +137,7 @@ function modelRecordsTable(rows) {
     return `<tr><td><button class="run-link" data-run="${escapeHTML(r.id)}">${escapeHTML(r.name)}</button><small>${escapeHTML(title(r.category))}</small><details><summary>${fmt(r.classes)} classes</summary><span>${escapeHTML((r.class_labels || []).join(', ') || 'Class labels unavailable')}</span></details></td>
     <td><span class="tag ${record.decision === 'Preferred' ? 'ready' : ''}">${escapeHTML(record.decision || 'Not tested')}</span></td>
     <td><span class="record-dataset">${escapeHTML(m.dataset || 'Dataset not recorded')}</span><small>Folders: ${escapeHTML(folders)}${m.input_kind ? ` · ${escapeHTML(m.input_kind)}` : ''}</small><small>Originals: ${recordValue(m.original_sources)} · Selected: ${recordValue(m.selected_sources)}</small><small>Train / validation / test: ${recordValue(counts.train)} / ${recordValue(counts.validation)} / ${recordValue(counts.test)}</small></td>
-    <td><span>Epochs recorded / max: ${recordValue(m.epochs_recorded)} / ${recordValue(t.epochs)}</span><small>Batch: ${recordValue(t.batch_size)} · LR: ${recordValue(t.learning_rate)}</small><small>Patience: ${recordValue(t.patience)} · Seed: ${recordValue(t.seed)}</small><small>Class weights: ${t.class_weights == null ? '—' : t.class_weights ? 'Yes' : 'No'}</small><small>Static variants (images): ${recordValue(p.static_variants)} · Jitter: ${recordValue(p.jitter_std)}</small><small>Video extras: ${recordValue(p.video_extra_samples)} · Warp: ${recordValue(p.video_time_warp)}</small><small>Detection confidence: ${recordValue(p.detection_confidence)}</small>${t.resume_from ? `<small>Resumed: ${escapeHTML(t.resume_from)}</small>` : ''}</td>
+    <td><span>Epochs recorded / max: ${recordValue(m.epochs_recorded)} / ${recordValue(t.epochs)}</span><small>Batch: ${recordValue(t.batch_size)} · LR: ${recordValue(t.learning_rate)}</small><small>Patience: ${recordValue(t.patience)} · Seed: ${recordValue(t.seed)}</small><small>Class weights: ${t.class_weights == null ? '—' : t.class_weights ? 'Yes' : 'No'}</small><small>Static variants (images): ${recordValue(p.static_variants)} · Jitter: ${recordValue(p.jitter_std)}</small><small>Video extras: ${recordValue(p.video_extra_samples)} · Warp: ${recordValue(p.video_time_warp)} · Opposite-hand copies: ${p.video_mirror_hands == null ? 'Not recorded' : p.video_mirror_hands ? 'Yes' : 'No'}</small><small>Detection confidence: ${recordValue(p.detection_confidence)}</small>${t.resume_from ? `<small>Resumed: ${escapeHTML(t.resume_from)}</small>` : ''}</td>
     <td><strong>${recordPercent(r.accuracy)}</strong><small>Test accuracy</small><small>Macro F1: ${recordPercent(r.f1)}</small></td>
     <td><span>${escapeHTML(mode)}</span><small>Stillness: ${recordValue(record.settle_ms)} ms</small><small>Hands missing: ${recordValue(record.missing_ms)} ms</small><small>Frame interval: ${recordValue(record.frame_interval_ms)} ms</small><small>Live accuracy: ${recordPercent(liveAccuracy)}</small>${record.live_trials ? `<small>${recordValue(record.live_correct)} / ${recordValue(record.live_trials)} correct</small>` : ''}<small>Response: ${recordValue(record.response_ms)} ms</small>${record.tested_on ? `<small>Tested: ${escapeHTML(record.tested_on)}</small>` : ''}</td>
     <td><div class="record-notes">${escapeHTML(record.notes || 'No notes yet.')}</div>${record.device ? `<small>Device / session: ${escapeHTML(record.device)}</small>` : ''}</td>
@@ -261,6 +261,9 @@ function renderRuns() {
   const rows = state.runs.filter(r => (!filter || r.category === filter)
     && (!preferredOnly || modelRecord(r.id).decision === 'Preferred'));
   $('all-runs').innerHTML = modelRecordsTable(rows);
+  document.querySelectorAll('#all-runs .record-actions').forEach((actions, index) => {
+    actions.insertAdjacentHTML('beforeend', paperReportActions(rows[index].id, 'run'));
+  });
   $('benchmark-table').innerHTML = benchmarkTable(rows);
   $('run-record-summary').textContent = `${rows.length} saved runs shown. Preferred models are selected manually, one per category.`;
   renderTestHistory();
@@ -270,7 +273,7 @@ function nextTestNumber(run) {
 }
 function modelDescription(model) {
   const m = model.metadata || {}, t = m.training || {}, p = m.preparation || {}, counts = m.split_counts || {};
-  return `<details><summary>Model details saved with this test</summary><p>Dataset: ${escapeHTML(m.dataset || 'Not recorded')}<br>Source folders: ${escapeHTML((m.source_folders || []).join(', ') || 'Not recorded')}<br>Input: ${recordValue(m.input_kind)} · Originals: ${recordValue(m.original_sources)} · Selected: ${recordValue(m.selected_sources)}<br>Train / validation / test: ${recordValue(counts.train)} / ${recordValue(counts.validation)} / ${recordValue(counts.test)}<br>Epochs recorded / max: ${recordValue(m.epochs_recorded)} / ${recordValue(t.epochs)}<br>Batch: ${recordValue(t.batch_size)} · LR: ${recordValue(t.learning_rate)}<br>Patience: ${recordValue(t.patience)} · Seed: ${recordValue(t.seed)} · Class weights: ${t.class_weights == null ? '—' : t.class_weights ? 'Yes' : 'No'}<br>Static variants: ${recordValue(p.static_variants)} · Jitter: ${recordValue(p.jitter_std)}<br>Video extras: ${recordValue(p.video_extra_samples)} · Warp: ${recordValue(p.video_time_warp)}<br>Detection confidence: ${recordValue(p.detection_confidence)}${t.resume_from ? `<br>Resumed: ${escapeHTML(t.resume_from)}` : ''}<br>Offline test accuracy: ${recordPercent(model.accuracy)} · Macro F1: ${recordPercent(model.f1)}<br>Classes: ${escapeHTML((model.class_labels || []).join(', '))}${model.record?.notes ? `<br>Model notes: ${escapeHTML(model.record.notes)}` : ''}</p></details>`;
+  return `<details><summary>Model details saved with this test</summary><p>Dataset: ${escapeHTML(m.dataset || 'Not recorded')}<br>Source folders: ${escapeHTML((m.source_folders || []).join(', ') || 'Not recorded')}<br>Input: ${recordValue(m.input_kind)} · Originals: ${recordValue(m.original_sources)} · Selected: ${recordValue(m.selected_sources)}<br>Train / validation / test: ${recordValue(counts.train)} / ${recordValue(counts.validation)} / ${recordValue(counts.test)}<br>Epochs recorded / max: ${recordValue(m.epochs_recorded)} / ${recordValue(t.epochs)}<br>Batch: ${recordValue(t.batch_size)} · LR: ${recordValue(t.learning_rate)}<br>Patience: ${recordValue(t.patience)} · Seed: ${recordValue(t.seed)} · Class weights: ${t.class_weights == null ? '—' : t.class_weights ? 'Yes' : 'No'}<br>Static variants: ${recordValue(p.static_variants)} · Jitter: ${recordValue(p.jitter_std)}<br>Video extras: ${recordValue(p.video_extra_samples)} · Warp: ${recordValue(p.video_time_warp)} · Opposite-hand copies: ${p.video_mirror_hands == null ? 'Not recorded' : p.video_mirror_hands ? 'Yes' : 'No'}<br>Detection confidence: ${recordValue(p.detection_confidence)}${t.resume_from ? `<br>Resumed: ${escapeHTML(t.resume_from)}` : ''}<br>Offline test accuracy: ${recordPercent(model.accuracy)} · Macro F1: ${recordPercent(model.f1)}<br>Classes: ${escapeHTML((model.class_labels || []).join(', '))}${model.record?.notes ? `<br>Model notes: ${escapeHTML(model.record.notes)}` : ''}</p></details>`;
 }
 function renderTestHistory() {
   const all = Object.values(state.prediction_tests || {});
@@ -493,6 +496,13 @@ function renderDatasets() {
   const rows = state.categories.filter(c => c.name.toLowerCase().includes(search));
   $('dataset-list').innerHTML = rows.length ? rows.map(c => `<article class="dataset-item"><div class="dataset-item-heading"><div><span class="category-name">${escapeHTML(title(c.name))}</span><div class="category-meta">${fmt(c.samples)} sources · ${fmt(c.classes.length)} gesture folders · ${fmt(c.datasets?.length)} prepared datasets</div></div><span class="tag ${c.prepared ? 'ready' : ''}">${c.prepared ? 'Prepared' : 'Not prepared'}</span></div><div class="chips">${c.classes.map(g => `<span class="chip">${escapeHTML(g.name)} <small>${fmt(g.samples)}</small></span>`).join('') || '<span class="hint">No gesture folders yet.</span>'}</div>${(c.datasets || []).map(d => `<div class="dataset-version"><div><strong>${escapeHTML(d.name)}</strong><p class="hint">${escapeHTML(d.path)}${d.summary.total_output_sequences ? ` · ${fmt(d.summary.total_output_sequences)} prepared sequences` : ''}</p></div><button class="button secondary submit-job" type="button" data-inspect="${escapeHTML(c.name)}" data-dataset="${escapeHTML(d.path)}">Validate dataset ↗</button></div>`).join('')}<div class="dataset-actions"><button data-prepare="${escapeHTML(c.name)}">Prepare another dataset ↗</button></div></article>`).join('') : empty('No matching categories. Check your source and dataset folders.');
   controls();
+  $('dataset-list').querySelectorAll('[data-inspect]').forEach(button => {
+    button.insertAdjacentHTML('afterend', paperReportActions(button.dataset.dataset, 'dataset'));
+  });
+}
+function paperReportActions(path, kind) {
+  const url = path.split('/').map(encodeURIComponent).join('/');
+  return `<button class="button secondary submit-job" type="button" data-paper-report-${kind}="${escapeHTML(path)}">Build tables &amp; charts</button> <a class="button secondary" href="/paper-report/${url}/paper_report/index.html" target="_blank" rel="noopener">Open tables &amp; charts ↗</a>`;
 }
 async function scan() {
   const version = ++scanVersion;
@@ -807,6 +817,12 @@ for (const [id, action] of [['prepare-form', 'prepare'], ['train-form', 'train']
   });
 }
 document.addEventListener('click', event => {
+  const allReports = event.target.closest('[data-paper-report-all]');
+  if (allReports) { startJob({action: 'paper-report'}); return; }
+  const runReport = event.target.closest('[data-paper-report-run]');
+  if (runReport) { startJob({action: 'paper-report', run: runReport.dataset.paperReportRun}); return; }
+  const datasetReport = event.target.closest('[data-paper-report-dataset]');
+  if (datasetReport) { startJob({action: 'paper-report', dataset: datasetReport.dataset.paperReportDataset}); return; }
   const cameraTest = event.target.closest('[data-hudyat-timing-run]');
   if (cameraTest) { startJob({action: 'hudyat-timing', run: cameraTest.dataset.hudyatTimingRun, hudyat_project: $('hudyat-project').value}); return; }
   const benchmark = event.target.closest('[data-benchmark-run]');

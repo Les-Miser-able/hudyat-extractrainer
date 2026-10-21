@@ -116,6 +116,19 @@ class NativeWorkspaceTests(unittest.TestCase):
         self.assertIn(str(self.root / 'runs' / 'alphabet' / 'native_run'), command)
         self.assertIn('--epochs', command)
 
+    def test_native_preparation_forwards_opposite_hand_option(self):
+        from fsl_trainer.dashboard import server
+        window = self.window
+        self.assertFalse(window.prepare_fields['video_mirror_hands'].isChecked())
+        window.prepare_fields['dataset_name'].setText('mirror_fresh')
+        window.prepare_fields['video_mirror_hands'].setChecked(True)
+        with patch.object(self.jobs, 'start', return_value='mirror-job') as start:
+            window.prepare()
+            self.wait_for(lambda: start.called and not window.tasks)
+            request = start.call_args.args[0]
+        self.assertTrue(request['video_mirror_hands'])
+        self.assertIn('--video-mirror-hands', server.build_command(request))
+
     def test_saved_run_curves_and_review_preserve_checkpoint(self):
         window = self.window
         before = (self.run / 'best.keras').read_bytes()

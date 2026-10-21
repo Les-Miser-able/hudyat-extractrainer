@@ -238,13 +238,14 @@ class PredictionTestTests(unittest.TestCase):
         self.assertEqual(rows[0]['Expected gesture'], 'afternoon')
         self.assertEqual(rows[0]['Predicted gesture'], 'afternoon')
         self.assertEqual(rows[0]['Correct'], 'True')
+        self.assertTrue(rows[0]['Confidence (%)'].endswith('%'))
         self.assertEqual(rows[0]['Response (ms)'], '100.0')
         metrics = list(csv.DictReader(io.StringIO(metrics_csv(test))))
-        self.assertEqual(metrics[0]['Accuracy'], '1.0')
-        self.assertEqual(metrics[0]['Precision'], '', 'macro evidence is incomplete')
+        self.assertEqual(metrics[0]['Accuracy (%)'], '100.00%')
+        self.assertEqual(metrics[0]['Precision (%)'], '', 'macro evidence is incomplete')
         self.assertEqual(metrics[0]['Coverage complete'], 'False')
         self.assertEqual(metrics[1]['Gesture'], 'afternoon')
-        self.assertEqual(metrics[1]['Recall'], '1.0')
+        self.assertEqual(metrics[1]['Recall (%)'], '100.00%')
         self.assertEqual(metrics[2]['Trials'], '0')
 
 

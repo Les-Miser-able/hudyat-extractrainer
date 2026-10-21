@@ -5,6 +5,7 @@ import math
 import statistics
 
 from .timing import capture_timing
+from ..reporting.formatting import percentage
 
 TIMING_SCOPE = 'trainer_camera_first_hand_to_prediction_received'
 OUTCOMES = ('prediction', 'timeout', 'incomplete', 'stopped', 'error')
@@ -113,7 +114,7 @@ def trials_csv(test):
     handle = io.StringIO(newline='')
     writer = csv.writer(handle)
     writer.writerow(['Test', 'Model', 'Run', 'Trial ID', 'Recorded at', 'Expected gesture',
-                     'Predicted gesture', 'Outcome', 'Correct', 'Confidence', 'Response (ms)',
+                     'Predicted gesture', 'Outcome', 'Correct', 'Confidence (%)', 'Response (ms)',
                      'Elapsed (ms)', 'Timing scope', 'Captured frames', 'Gesture duration (ms)',
                      'Camera mode', 'Stillness delay (ms)', 'Hands missing delay (ms)',
                      'Frame interval (ms)', 'Device / session'])
@@ -124,7 +125,7 @@ def trials_csv(test):
         settings = trial['settings']
         writer.writerow([cell(v) for v in [test['name'], test['model']['category'], test['run'],
             trial['id'], trial['captured_at'], trial['expected'], trial['predicted'], trial['outcome'],
-            trial['correct'], trial['confidence'], trial['response_ms'], trial['elapsed_ms'],
+            trial['correct'], percentage(trial['confidence']), trial['response_ms'], trial['elapsed_ms'],
             trial['timing_scope'], trial['frames'], trial['duration_ms'], settings['mode'],
             settings['settle_ms'], settings['missing_ms'], settings['frame_interval_ms'],
             test['record'].get('device', '')]])
@@ -134,20 +135,20 @@ def trials_csv(test):
 def metrics_csv(test):
     handle = io.StringIO(newline='')
     writer = csv.writer(handle)
-    writer.writerow(['Scope', 'Gesture', 'Trials', 'Correct', 'Accuracy', 'Precision', 'Recall',
-                     'F1', 'Unrecognized', 'Lowest gesture recall', 'Median response (ms)',
+    writer.writerow(['Scope', 'Gesture', 'Trials', 'Correct', 'Accuracy (%)', 'Precision (%)', 'Recall (%)',
+                     'F1 (%)', 'Unrecognized', 'Lowest gesture recall (%)', 'Median response (ms)',
                      'P95 response (ms)', 'Maximum response (ms)', 'Timed predictions',
                      'Timeouts', 'Incomplete', 'Stopped', 'Errors', 'Coverage complete', 'Timing scope'])
     report = test['measurements']
     timing, outcomes = report['timing'], report['outcomes']
-    writer.writerow(['Session', '', report['trials'], report['correct'], report['accuracy'],
-                     report['macro_precision'], report['macro_recall'], report['macro_f1'],
-                     sum(report['unrecognized'].values()), report['lowest_sign_recall'],
+    writer.writerow(['Session', '', report['trials'], report['correct'], percentage(report['accuracy']),
+                     percentage(report['macro_precision']), percentage(report['macro_recall']), percentage(report['macro_f1']),
+                     sum(report['unrecognized'].values()), percentage(report['lowest_sign_recall']),
                      timing['median_ms'], timing['p95_ms'], timing['max_ms'], timing['samples'],
                      outcomes['timeout'], outcomes['incomplete'], outcomes['stopped'], outcomes['error'],
                      report['coverage_complete'], timing['scope']])
     for label, row in report['per_class'].items():
         safe_label = "'" + label if label.startswith(('=', '+', '-', '@', '\t', '\r', '\n')) else label
         writer.writerow(['Gesture', safe_label, row['support'], row['correct'], '',
-                         row['precision'], row['recall'], row['f1'], row['unrecognized']])
+                         percentage(row['precision']), percentage(row['recall']), percentage(row['f1']), row['unrecognized']])
     return handle.getvalue()

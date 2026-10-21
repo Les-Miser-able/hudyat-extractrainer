@@ -69,4 +69,6 @@ def benchmark_run(args):
     timing = measure_latency(model, samples, classes)
     timing['tensorflow_version'] = tf.__version__
     report = save_benchmark(run, metrics, classes, timing)
+    from ..reporting.paper import save_model_report
+    save_model_report(run)
     print(json.dumps(report, indent=2))

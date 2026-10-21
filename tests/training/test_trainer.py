@@ -102,6 +102,8 @@ class PreprocessingTests(unittest.TestCase):
                 t.prepare(args)
             manifest, classes, stats = t.inspect_dataset(root / "dataset")
             self.assertEqual(classes, ["A", "J"])
+            self.assertTrue((root / "dataset" / "paper_report" / "index.html").is_file())
+            self.assertTrue((root / "dataset" / "paper_report" / "split_counts.png").is_file())
             self.assertEqual(len(manifest), 45)
             summary = json.loads((root / "dataset" / "augmentation_summary.json").read_text())
             self.assertEqual(summary["original_sources"], 10)

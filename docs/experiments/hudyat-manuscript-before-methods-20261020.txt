@@ -1,0 +1,38 @@
+﻿HUDYAT: AN AI-BASED FILIPINO SIGN LANGUAGE LEARNING SUPPORT SYSTEM
+Christian C. Diang, Lee Russel A. Ibañez, and Aron Jacob B. Masecampo
+Information Technology Department
+School of Engineering
+Eastern Visayas State University
+Tacloban City, Philippines
+christian.diang@evsu.edu.ph, leerussel.ibañez@evsu.edu.ph, aronjacob.masecampo@evsu.edu.ph
+________________
+
+
+Abstract — Deaf and Hard-of-Hearing (DHH) learners need repeated practice of Filipino Sign Language (FSL) signs and explanations of their meaning and proper use. In the inclusive learning resource center studied in Tanauan, Leyte, this support depends largely on one-on-one teacher instruction, and no dedicated digital tool exists. Existing FSL recognition systems check whether a sign is performed correctly but rarely connect that feedback with instruction. This study presents HUDYAT, an AI-based FSL learning support system delivered as a Progressive Web App that links lessons, camera-based practice, and quizzes. This paper covers four categories totaling 52 signs: the FSL alphabet, numbers, colors, and greetings. Hand landmarks extracted with MediaPipe Hands are classified in the browser by four category-specific Conv1D-BiLSTM models. Videos recorded by three signers were randomly divided into training (70%), validation (15%), and testing (15%) sets. Across the four models, mean test accuracy and macro F1-score were both 98.25%, and all 52 signs reached at least 70% recall. These results demonstrate promising classification performance and suggest that HUDYAT can support independent FSL practice through interactive lessons, camera-based sign recognition, and quizzes.
+Keywords: Filipino Sign Language, sign language recognition, Conv1D-BiLSTM, MediaPipe, Deaf education
+________________
+INTRODUCTION
+
+
+For Deaf and Hard-of-Hearing (DHH) learners, access to an appropriate language is important for learning, communication, and participation in school. Filipino Sign Language (FSL) is recognized as the national sign language of the Filipino Deaf community under Republic Act No. 11106, which provides for its use in education (Republic Act No. 11106, 2018). Republic Act No. 11650 (2022) further supports inclusive education for learners with disabilities, and the 2020 Census of Population and Housing reported about 1.78 million Filipinos with functional hearing difficulty (Philippine Statistics Authority, 2022).
+Access to FSL alone does not ensure effective learning. DHH learners may experience difficulties in vocabulary and language learning (Jønsberg et al., 2025; Walker et al., 2023), and FSL has its own grammar, including distinct word order and non-manual signals (Philippine Deaf Resource Center and Philippine Federation of the Deaf, 2004). Madronio et al. (2024) found that Grade 4 to 6 DHH learners struggled with Filipino-written vocabulary, while an FSL-based multimedia intervention significantly improved their performance. Learners therefore need repeated opportunities to see, review, and practice signs together with their meaning and use.
+This need is evident at the Tanauan II Central School Inclusive Learning Resource Center, where an FSL teacher handles two DHH learners. The teacher uses slides, charts, flashcards, videos, and direct demonstration, but explanations of meaning, proper use, and context are given mainly one-on-one. Available digital resources are mostly text-based, and there is no dedicated tool for independent review and practice.
+Technology-assisted FSL studies show that automated systems can recognize FSL signs from camera input. Montefalcon et al. (2021, 2022), Cayme et al. (2024), Pilare et al. (2024), and Oropesa et al. (2024) demonstrated recognition using CNN, LSTM, and CNN-LSTM models, often with MediaPipe hand landmarks. Suamina et al. (2025) added real-time feedback, and KamAI (Lota, Aguila, & Fradejas, 2025) combined recognition with tutorial videos. However, these systems mainly report whether a sign is recognized; they do not connect that feedback with explanations of meaning and use, structured practice, and assessment for a specific group of learners.
+To address this gap, this study developed HUDYAT, from the Filipino word for "signal" or "cue," an AI-based FSL learning support system that lets learners study a sign, practice it in front of a camera, receive feedback, and take a quiz before moving on. HUDYAT supplements, and does not replace, the FSL teacher. This paper reports the first development stage of HUDYAT, covering four sign categories: the FSL alphabet, numbers, colors, and greetings.
+
+
+Objectives. This study aimed to develop HUDYAT for the four categories. Specifically, it aimed to:
+
+
+1. Prepare an FSL gesture dataset by combining researcher-recorded gesture videos with a public FSL alphabet image dataset.
+2. Develop and evaluate a recognition model for each category using MediaPipe Hands and Conv1D-LSTM, measuring accuracy, precision, recall, F1-score, and response time against a predefined performance benchmark
+3. Develop the learning, practice, and quiz features of HUDYAT for the four categories and verify them through functional testing.
+
+
+
+
+METHODS
+
+
+The study followed a developmental research design using an Agile approach, with iterations for data collection, landmark extraction, model development, application development, and system integration.
+Sign vocabulary. The study covered 52 signs in four categories, each recognized by its own Conv1D-LSTM model (Table 1). Each model also included a None class for idle hands and non-sign movement.
