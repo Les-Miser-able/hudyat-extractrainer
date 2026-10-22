@@ -8,7 +8,8 @@ import unittest
 from unittest.mock import patch
 from zipfile import ZipFile
 
-from fsl_trainer.dashboard.model_exports import native_archive, write_hudyat_bundle, export_options
+from fsl_trainer.dashboard.model_exports import (native_archive, write_hudyat_bundle, export_options,
+                                                export_folder_name, hudyat_export_path)
 from fsl_trainer.dashboard.model_records import save_record
 from integrations.hudyat.install_hudyat import import_bundle
 from integrations.hudyat.runtime_support import runtime_changes, apply_changes
@@ -102,6 +103,19 @@ class ModelExportTests(unittest.TestCase):
         self.assertTrue(handle.closed)
         self.assertEqual(before, {p.name: p.read_bytes() for p in self.run.iterdir()})
 
+    def test_export_folder_names_are_validated_before_creating_outputs(self):
+        for name in ('Alphabet v2', 'alphabet-v2', '_alphabet', 'release.2', 'x' * 100):
+            with self.subTest(name=name):
+                self.assertEqual(export_folder_name(name), name)
+                path = hudyat_export_path(self.root, '1122334455667788', name)
+                self.assertEqual(path, self.root / 'exports/hudyat' / name / (name + '.zip'))
+        for name in ('', '.', '..', '.hidden', ' leading', 'trailing ', 'trailing.',
+                     '../outside', 'a/b', 'a\\b', 'a:b', 'a"b', 'a\nb', 'x' * 101,
+                     'CON', 'con.txt', 'CON .txt', 'nul', 'COM1', 'lpt9.txt', None, True, []):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                export_folder_name(name)
+        self.assertFalse((self.root / 'exports').exists())
+
     def test_missing_artifacts_unknown_runs_and_landmark_only_browser_exports_are_rejected(self):
         with self.assertRaises(ValueError):
             with native_archive(self.root, '../outside', self.known):
@@ -145,7 +159,9 @@ class ModelExportTests(unittest.TestCase):
         self.assertEqual(self.output.read_bytes(), b'existing bundle')
 
     def test_import_merges_one_category_and_installs_idempotent_camera_support(self):
+        self.output = hudyat_export_path(self.root, '1122334455667788', 'Alphabet v2')
         folder, project = self.extracted(), self.hudyat()
+        self.assertTrue(self.output.is_file())
         import_bundle(folder, project)
         assets = project / 'server/model-assets'
         entries = {e['id']: e for e in json.loads((assets / 'catalog.json').read_text())['categories']}

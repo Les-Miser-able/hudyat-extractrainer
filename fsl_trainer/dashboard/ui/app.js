@@ -492,6 +492,7 @@ function openModelExport(id) {
   const run = state.runs.find(r => r.id === id);
   if (!run || !(run.exports?.hudyat ?? run.checkpoint)) return;
   exportingRun = id;
+  $('export-name').value = `${run.category}-${run.name}`.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 100);
   $('model-export-title').textContent = `Export for HUDYAT: ${title(run.category)} / ${run.name}`;
   $('model-export-error').hidden = true;
   $('model-export-editor').hidden = false;
@@ -914,7 +915,7 @@ $('run-filter').addEventListener('change', renderRuns);
 $('run-preferred-only').addEventListener('change', renderRuns);
 $('model-export-form').addEventListener('submit', event => {
   event.preventDefault();
-  if (exportingRun) startJob({action:'export', run:exportingRun, hand_model:$('export-hand-model').value});
+  if (exportingRun) startJob({action:'export', run:exportingRun, export_name:$('export-name').value.trim(), hand_model:$('export-hand-model').value});
 });
 $('model-export-close').addEventListener('click', () => { $('model-export-editor').hidden = true; });
 $('download-export').addEventListener('click', () => downloadRecord(`/api/model/export/download?id=${encodeURIComponent($('download-export').dataset.id)}`));

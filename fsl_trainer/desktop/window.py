@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 
 from ..dashboard import server as backend
 from ..dashboard.live import LiveInference
-from ..dashboard.model_exports import native_archive
+from ..dashboard.model_exports import native_archive, download_name, export_folder_name, hudyat_export_path
 from ..dashboard.model_records import DECISIONS, read_records, save_record
 from ..dashboard.prediction_tests import export_model, save_test
 from ..data.preprocessing import HAND_RELATIVE
@@ -455,7 +455,7 @@ class StudioWindow(QMainWindow):
         layout.addWidget(form_group("Review", [("Decision", self.decision), ("Notes", self.notes)]))
         layout.addWidget(button("Save model review", self.save_review))
         layout.addWidget(button("Save Keras model ZIP…", self.export_keras, True))
-        layout.addWidget(button("Build HUDYAT bundle", lambda: self.model_job("export")))
+        layout.addWidget(button("Build HUDYAT bundle…", lambda: self.model_job("export")))
         layout.addWidget(button("Run benchmark", lambda: self.model_job("benchmark")))
         layout.addWidget(button("Export model record JSON…", self.export_record))
         layout.addWidget(button("Open run folder", self.open_run_folder))
@@ -1096,8 +1096,19 @@ class StudioWindow(QMainWindow):
 
     def model_job(self, action):
         row = self.require_run()
-        if row:
-            self.request_job({"action": action, "run": row["id"]})
+        if not row:
+            return
+        data = {"action": action, "run": row["id"]}
+        if action == "export":
+            name, ok = QInputDialog.getText(self, "Export for HUDYAT", "Export folder name:",
+                text=download_name(row['category'] + '-' + row['name']))
+            if not ok:
+                return
+            try:
+                data['export_name'] = export_folder_name(name.strip())
+            except ValueError as error:
+                return self.error(str(error))
+        self.request_job(data)
 
     def save_text(self, title, filename, text, file_filter):
         target, _ = QFileDialog.getSaveFileName(self, title, str(self.root / "exports" / filename), file_filter)
@@ -1127,7 +1138,14 @@ class StudioWindow(QMainWindow):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.root / row["id"])))
 
     def open_export_folder(self):
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.root / "exports" / "hudyat")))
+        folder = self.root / 'exports/hudyat'
+        job = self.last_jobs.get(self.job_select.currentData())
+        if job and job['action'] == 'export' and job['status'] == 'completed':
+            try:
+                folder = hudyat_export_path(self.root, job['id'], job.get('export_name')).parent
+            except ValueError as error:
+                return self.error(str(error))
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
 
     def choose_prediction_sample(self):
         path, _ = QFileDialog.getOpenFileName(self, "Choose a project sample", str(self.root / "data"), "Source samples (*)")

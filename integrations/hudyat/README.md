@@ -4,10 +4,19 @@ In **Model runs**, each trained model has these actions:
 
 - **Download model ZIP** saves the Keras checkpoint, class labels, preprocessing,
   recorded model details and test history, and available training reports.
-- **Export for HUDYAT** opens an export form. The hand detector is matched to
+- **Export for HUDYAT** opens an export form. Choose an **Export folder name**.
+  The hand detector is matched to
   training automatically, or you can supply a project-relative `.task` path.
   **Create HUDYAT bundle** runs conversion in Activity. When complete, choose
   **Download HUDYAT bundle** there.
+
+In the native desktop app, **Build HUDYAT bundle…** prompts for the folder name
+before starting the job. For example, `alphabet-v2` saves the ZIP at
+`exports/hudyat/alphabet-v2/alphabet-v2.zip`; browser downloads use
+`alphabet-v2.zip` too. Names can contain letters, numbers, spaces, hyphens,
+underscores, and dots, up to 100 characters. Choose a new name for each export;
+existing ZIPs are never overwritten. The model version folders inside the bundle
+retain their content hashes for HUDYAT's importer.
 
 The HUDYAT ZIP contains versioned browser weights, metadata, parity fixtures,
 the matching MediaPipe detector, and a catalog with just the selected category.
@@ -43,7 +52,7 @@ or establish motion recognition for J/Z.
 For command-line export from the trainer folder:
 
 ```powershell
-.\.venv\Scripts\python.exe -B tools/export_hudyat_model.py --run "runs/alphabet/alphabet-prototype1-MODEL" --output "exports/hudyat/alphabet.zip"
+.\.venv\Scripts\python.exe -B tools/export_hudyat_model.py --run "runs/alphabet/alphabet-prototype1-MODEL" --output "exports/hudyat/alphabet-v2/alphabet-v2.zip"
 ```
 
 To apply only the camera preprocessing update to an existing HUDYAT checkout:

@@ -237,6 +237,41 @@ class NativeWorkspaceTests(unittest.TestCase):
         self.assertEqual(window.last_prediction['prediction']['probabilities'], {'A':.9,'B':.1})
         self.assertTrue(window.save_prediction_button.isEnabled())
 
+    def test_hudyat_export_prompts_for_a_folder_and_forwards_its_name(self):
+        window = self.window
+        window.run_table.selectRow(0)
+        with patch('fsl_trainer.desktop.window.QInputDialog.getText',
+                   return_value=(' Alphabet v2 ', True)) as prompt, \
+                patch.object(window, 'request_job') as request:
+            window.model_job('export')
+        self.assertEqual(prompt.call_args.kwargs['text'], 'alphabet-first')
+        request.assert_called_once_with({'action': 'export', 'run': 'runs/alphabet/first',
+                                         'export_name': 'Alphabet v2'})
+
+    def test_hudyat_export_cancellation_and_invalid_names_never_start_a_job(self):
+        self.window.run_table.selectRow(0)
+        for result in (('unused', False), ('', True), ('../outside', True), ('CON', True)):
+            with self.subTest(result=result), \
+                    patch('fsl_trainer.desktop.window.QInputDialog.getText', return_value=result), \
+                    patch.object(self.window, 'request_job') as request, \
+                    patch.object(self.window, 'error') as error:
+                self.window.model_job('export')
+                request.assert_not_called()
+                self.assertEqual(error.called, result[1])
+
+    def test_show_exported_bundle_opens_the_selected_named_folder(self):
+        window = self.window
+        job_id = '1122334455667788'
+        window.job_select.blockSignals(True)
+        window.job_select.addItem('Completed export', job_id)
+        window.job_select.blockSignals(False)
+        window.last_jobs[job_id] = {'id': job_id, 'action': 'export', 'status': 'completed',
+                                    'export_name': 'Alphabet v2'}
+        with patch('fsl_trainer.desktop.window.QDesktopServices.openUrl') as open_url:
+            window.open_export_folder()
+        self.assertEqual(Path(open_url.call_args.args[0].toLocalFile()),
+                         self.root / 'exports/hudyat/Alphabet v2')
+
     def test_camera_preview_is_larger_and_mirroring_changes_display_without_mutating_frames(self):
         from PySide6.QtGui import QColor, QImage, QPainter
         window = self.window

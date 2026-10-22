@@ -7,6 +7,25 @@ From the project root in PowerShell:
 .\.venv\Scripts\python.exe dashboard.py
 ```
 
+To open the app by double-clicking on Windows, build the launcher once:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\build_windows_launcher.ps1
+```
+
+Open **FSL Studio.exe** beside `dashboard.py`, or create a shortcut to it on your
+desktop. The launcher finds the project relative to its own location, so a
+shortcut can use any **Start in** folder. It uses `.venv\Scripts\python.exe`
+without showing a console; training and camera workers use that same interpreter.
+The project, virtual environment, and installed dependencies are required. When
+moving to another computer, follow the repository setup to recreate `.venv`.
+
+Each launch writes a UTF-8 log under `outputs/launcher/`. A failed launch shows
+an error dialog with the log location and a dependency installation command.
+The executable is generated locally and ignored by Git; rebuild it after a fresh
+clone or changes to `tools/windows/StudioLauncher.cs`. Building uses the .NET
+Framework 4.x compiler included with Windows and does not download packages.
+
 The interface uses PySide6 / Qt Widgets, without HTML, JavaScript, WebView2,
 Electron, or an HTTP server in the desktop launch path. Python workers still
 handle training, preparation, export, and inference using the same environment
@@ -41,6 +60,12 @@ Use a new dataset name and run name when outputs already exist. The underlying
 job service protects previous outputs. Stopping a job keeps partial artifacts;
 closing the app while a worker runs asks whether to stop it and exit. Camera
 and preparation/training jobs share the existing exclusive worker rules.
+
+In **Model runs**, choose a model and click **Build HUDYAT bundle…**. Enter an
+**Export folder name**, then confirm to start conversion. For example,
+`alphabet-v2` saves `exports/hudyat/alphabet-v2/alphabet-v2.zip`. Use **Show exported
+bundle** in **Output / Jobs** to open that folder. Existing ZIPs are protected; choose another
+name to export that model again. Cancel closes the prompt without starting a job.
 
 ## Monitors
 

@@ -144,6 +144,19 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(command[command.index('--run') + 1], request['run'])
         self.assertEqual(command[command.index('--output') + 1], str(self.root / 'exports/hudyat/0011223344556677.zip'))
         self.assertEqual(command[command.index('--hand-model') + 1], str(detector))
+        named = {**request, 'export_name': 'Alphabet v2'}
+        output = self.root / 'exports/hudyat/Alphabet v2/Alphabet v2.zip'
+        command = dashboard.build_command(named)
+        self.assertEqual(command[command.index('--output') + 1], str(output))
+        self.assertFalse(output.parent.exists())
+        for name in ('', '../outside', 'a/b', 'a\\b', 'CON', 'name.', None, True, []):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                dashboard.build_command({**request, 'export_name': name})
+        output.parent.mkdir(parents=True)
+        output.write_bytes(b'previous export')
+        with self.assertRaisesRegex(ValueError, 'already exists'):
+            dashboard.build_command(named)
+        self.assertEqual(output.read_bytes(), b'previous export')
         for changes in ({'run': '../outside'}, {'_job_id': '../outside'}, {'hand_model': '../outside.task'},
                         {'hand_model': True}, {'hand_model': ['assets/hand_landmarker.task']}):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
@@ -252,6 +265,18 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(job["status"], "failed")
         self.assertEqual(job["exit_code"], 3)
         self.assertIn("sample output", job["logs"])
+
+    def test_export_worker_keeps_its_folder_name_for_the_completed_download(self):
+        jobs = dashboard.Jobs()
+        self.addCleanup(jobs.shutdown)
+        command = [sys.executable, '-u', '-c', "print('bundle ready')"]
+        request = {'action': 'export', 'run': 'runs/alphabet/first', 'export_name': 'Alphabet v2'}
+        with patch.object(dashboard, 'build_command', return_value=command) as build:
+            job_id = jobs.start(request)
+        job = self.wait_job(jobs)
+        self.assertEqual(job['status'], 'completed')
+        self.assertEqual(job['export_name'], request['export_name'])
+        self.assertEqual(build.call_args.args[0], {**request, '_job_id': job_id})
 
     def test_single_worker_and_cancellation(self):
         jobs = dashboard.Jobs()
@@ -492,6 +517,20 @@ class DashboardHTTPTests(unittest.TestCase):
                 job['status'] = status
                 self.assertEqual(self.request('/api/model/export/download?id=' + job_id)[0], 400)
         self.assertEqual(self.request('/api/model/export/download?id=../outside')[0], 400)
+
+    def test_named_hudyat_download_uses_the_export_folder_and_filename(self):
+        job_id, name = '1122334455667788', 'Alphabet v2'
+        bundle = Path(self.temp.name) / 'exports/hudyat' / name / (name + '.zip')
+        bundle.parent.mkdir(parents=True)
+        bundle.write_bytes(b'named export bundle')
+        job = {'id': job_id, 'action': 'export', 'status': 'completed',
+               'run': 'runs/alphabet/first', 'export_name': name}
+        with patch.object(self.server.jobs, 'snapshot', return_value=[job]):
+            with urlopen(self.origin + '/api/model/export/download?id=' + job_id, timeout=5) as response:
+                self.assertEqual(response.read(), b'named export bundle')
+                self.assertIn('filename="Alphabet v2.zip"', response.headers['Content-Disposition'])
+            job['export_name'] = '../outside'
+            self.assertEqual(self.request('/api/model/export/download?id=' + job_id)[0], 400)
 
     def test_automatic_trials_are_authorized_persistent_and_exportable_as_csv(self):
         run_id = 'runs/colors/automatic_fixture'

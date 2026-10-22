@@ -73,3 +73,6 @@ git
 # Rebuild paper figures and tables from saved evidence.
 /reports/paper/
 /.trash/
+
+# Rebuild the local Windows launcher with tools/build_windows_launcher.ps1.
+/FSL Studio.exe
