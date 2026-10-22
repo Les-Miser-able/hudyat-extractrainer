@@ -25,6 +25,34 @@ def download_name(value):
     return re.sub(r'[^a-zA-Z0-9_-]', '-', value)[:100] or 'model'
 
 
+def export_folder_name(value):
+    if (not isinstance(value, str)
+            or not re.fullmatch(r'[a-zA-Z0-9_-][a-zA-Z0-9 _.-]{0,99}', value)
+            or value.endswith(('.', ' '))):
+        raise ValueError('Use 1–100 letters, numbers, spaces, hyphens, underscores, or dots '
+                         'for the export folder name. Start and end without a dot or space.')
+    if value.split('.')[0].rstrip().upper() in {'CON', 'PRN', 'AUX', 'NUL',
+                                               *(f'COM{i}' for i in range(1, 10)),
+                                               *(f'LPT{i}' for i in range(1, 10))}:
+        raise ValueError('That export folder name is reserved by Windows. Choose another name.')
+    return value
+
+
+def hudyat_export_path(base, job_id, name=None):
+    if not isinstance(job_id, str) or not re.fullmatch(r'[a-f0-9]{16}', job_id):
+        raise ValueError('Invalid export job identifier.')
+    folder = Path(base) / 'exports/hudyat'
+    if name is None:
+        output = folder / (job_id + '.zip')
+    else:
+        name = export_folder_name(name)
+        output = folder / name / (name + '.zip')
+    if (Path(base).resolve() not in folder.resolve().parents
+            or folder.resolve() not in output.resolve().parents):
+        raise ValueError('HUDYAT exports must stay inside the project exports/hudyat folder.')
+    return output.resolve()
+
+
 def saved_run(base, run_id, known_runs):
     row = next((r for r in known_runs if r['id'] == run_id), None)
     if row is None:

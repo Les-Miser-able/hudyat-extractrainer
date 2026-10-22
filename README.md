@@ -65,6 +65,19 @@ Install the native desktop dependency and launch FSL Studio:
 .\.venv\Scripts\python.exe dashboard.py
 ```
 
+For a double-click Windows launcher, build it once:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\build_windows_launcher.ps1
+```
+
+Then double-click **FSL Studio.exe** in this folder. It opens the native app
+without a terminal, using the existing `.venv`. Keep the executable beside
+`dashboard.py`; you can create a desktop shortcut to it. This launcher requires
+the project and its installed dependencies on the computer. It does not bundle
+Python or the ML libraries. Startup failures show a message with the log path;
+logs are saved under `outputs/launcher/`.
+
 The default app uses **Python / PySide6 Qt Widgets** with movable, dockable panels.
 It does not embed a website, use WebView2, or start an HTTP server. The Extractor,
 Trainer, Model runs, and Prediction workspaces call the existing Python services

@@ -31,7 +31,8 @@ from .timing import capture_timing
 from .model_records import run_metadata, read_records, save_record
 from .prediction_tests import read_tests, save_test, export_model, append_trial
 from .prediction_trials import trials_csv, metrics_csv
-from .model_exports import native_archive, saved_run, export_options, matching_hand_model, download_name
+from .model_exports import (native_archive, saved_run, export_options, matching_hand_model,
+                            download_name, export_folder_name, hudyat_export_path)
 
 BASE = PROJECT_ROOT
 UI = Path(__file__).resolve().parent / "ui"
@@ -302,9 +303,10 @@ def build_command(data):
             raise ValueError(options['reason'])
         detector = matching_hand_model(BASE, run, data.get('hand_model'))
         export_id = data.get('_job_id') or secrets.token_hex(8)
-        if not isinstance(export_id, str) or len(export_id) != 16 or any(c not in '0123456789abcdef' for c in export_id):
-            raise ValueError('Invalid export job identifier.')
-        output = local_path('exports/hudyat/' + export_id + '.zip')
+        name = export_folder_name(data['export_name']) if 'export_name' in data else None
+        output = hudyat_export_path(BASE, export_id, name)
+        if output.exists():
+            raise ValueError('An export already exists with this folder name. Choose a new name.')
         return [sys.executable, '-u', '-B', str(BASE / 'tools/export_hudyat_model.py'),
                 '--run', row['id'], '--output', str(output), '--hand-model', str(detector)]
     elif action == "predict":
@@ -357,6 +359,7 @@ class Jobs:
                    "dataset": data.get("dataset") or data.get("dataset_name"),
                    "run": data.get("run") if data["action"] in {"predict", "export", "benchmark", "hudyat-timing", "paper-report"} else None,
                    "sample": data.get("sample") if data["action"] == "predict" else None,
+                   "export_name": data.get("export_name") if data["action"] == "export" else None,
                    "started": datetime.now().isoformat(timespec="seconds"),
                    "command": subprocess.list2cmdline(command), "exit_code": None,
                    "logs": deque(maxlen=1800)}
@@ -519,8 +522,10 @@ class Handler(BaseHTTPRequestHandler):
                             if j['id'] == job_id and j['action'] == 'export' and j['status'] == 'completed'), None)
                 if job is None:
                     raise ValueError('Complete a HUDYAT export before downloading its bundle.')
-                path = local_path('exports/hudyat/' + job_id + '.zip')
-                name = download_name(job['run'].replace('/', '-')) + '-hudyat.zip'
+                export_name = job.get('export_name')
+                path = hudyat_export_path(BASE, job_id, export_name)
+                name = (export_name + '.zip' if export_name is not None
+                        else download_name(job['run'].replace('/', '-')) + '-hudyat.zip')
                 with path.open('rb') as handle:
                     return self.download(handle, name)
             if url.path == "/api/model-record/export":

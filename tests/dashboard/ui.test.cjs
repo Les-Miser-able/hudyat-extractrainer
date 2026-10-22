@@ -664,6 +664,7 @@ test('model actions include trained ZIP download and HUDYAT export eligibility',
   assert.match(app.node('all-runs').innerHTML, /HUDYAT needs extraction metadata/);
   assert.match(app.node('all-runs').innerHTML, /data-export-model="runs\/colors\/arrays"[^>]*disabled/);
   app.run("openModelExport('runs/alphabet/a')");
+  assert.equal(app.node('export-name').value, 'alphabet-a');
   assert.equal(app.node('model-export-editor').hidden, false);
   assert.match(app.node('model-export-title').textContent, /Alphabet \/ a/);
   assert.equal(app.node('model-export-start').disabled, false);
@@ -675,6 +676,7 @@ test('HUDYAT export submits the selected model and custom detector through the j
   const app = dashboard(), requests = [];
   app.run("state.runs=[{id:'runs/alphabet/test model',name:'test model',category:'alphabet',checkpoint:true,exports:{hudyat:true}}]; openModelExport('runs/alphabet/test model');");
   app.node('export-hand-model').value = 'assets/custom detector.task';
+  app.node('export-name').value = ' Alphabet v2 ';
   app.context.fetch = async (url, options) => {
     if (options?.method === 'POST') requests.push([url, JSON.parse(options.body)]);
     return {ok:true,json:async()=>options?.method === 'POST' ? {id:'export-1'} : []};
@@ -686,6 +688,7 @@ test('HUDYAT export submits the selected model and custom detector through the j
   assert.equal(requests[0][1].action, 'export');
   assert.equal(requests[0][1].run, 'runs/alphabet/test model');
   assert.equal(requests[0][1].hand_model, 'assets/custom detector.task');
+  assert.equal(requests[0][1].export_name, 'Alphabet v2');
 });
 
 test('an export rejection keeps the form and explains the detector mismatch', async () => {
