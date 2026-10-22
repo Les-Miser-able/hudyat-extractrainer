@@ -75,10 +75,17 @@ def main(argv=None):
     probabilities = model(probes,training=False).numpy()
     (dest/"parity.json").write_text(json.dumps({"inputs":probes.tolist(),"expected":probabilities.tolist()}),encoding="utf-8")
     camera_cases = []
-    for sample, (width, height) in zip(probes, [(640, 480), (1280, 720), (480, 640)]):
+    missing = probes[1].copy()
+    missing[9:12, :63] = 0
+    missing[9:12, 126] = 0
+    for sample, (width, height) in zip([*probes, missing], [(640, 480), (1280, 720), (480, 640), (640, 480)]):
         expected_input = resample(preprocess_sequence(sample, width, height, normalization))
         camera_cases.append({"frames": sample.tolist(), "width": width, "height": height,
                              "expected": expected_input.tolist()})
+    camera_probabilities = model(np.asarray([case['expected'] for case in camera_cases], dtype=np.float32),
+                                 training=False).numpy()
+    for case, probabilities in zip(camera_cases, camera_probabilities):
+        case['probabilities'] = probabilities.tolist()
     (dest/"camera-preprocessing-parity.json").write_text(json.dumps(
         {"preprocessing": {"normalization": normalization}, "cases": camera_cases}), encoding="utf-8")
     catalog_path = args.site/"catalog.json"

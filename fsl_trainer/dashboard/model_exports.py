@@ -168,7 +168,8 @@ def write_hudyat_bundle(base, run_id, known_runs, output, hand_model=None):
                         raise ValueError('Exported artifacts must stay inside the bundle.')
                     archive.write(path, path.relative_to(staging).as_posix())
             for name in ('install_hudyat.py', 'runtime_support.py', 'model-preprocessing.js',
-                         'model-preprocessing.d.ts', 'model-preprocessing.test.mjs'):
+                         'model-preprocessing.d.ts', 'model-preprocessing.test.mjs',
+                         'runtime-probe.mjs', 'verify-bundle.mjs'):
                 archive.write(base / 'integrations/hudyat' / name, name)
             for name in ('benchmark.json', 'benchmark.csv', 'camera_timing.json'):
                 path = run / name
@@ -180,13 +181,25 @@ def write_hudyat_bundle(base, run_id, known_runs, output, hand_model=None):
             archive.writestr('HUDYAT_IMPORT.md',
                 '# Import ' + row['category'] + ' / ' + row['name'] + '\n\n'
                 'Extract this ZIP, then run from its extracted folder:\n\n'
-                '```powershell\npython install_hudyat.py --project "C:/Users/Russel/Desktop/HUDYAT"\n```\n\n'
+                '```powershell\npython install_hudyat.py --project "D:/path/to/your/HUDYAT"\n```\n\n'
+                'Replace D:/path/to/your/HUDYAT with the actual HUDYAT project folder on the computer '
+                'where you are installing this model. Choose the folder containing both client/ and server/, '
+                'not the extracted bundle or the server/ folder alone. The trainer and HUDYAT do not need '
+                'to be installed beside each other or at the exporter\'s original location.\n\n'
                 'The importer verifies file hashes, merges this category into server/model-assets/catalog.json, '
-                'and adds camera preprocessing support when needed. Other category entries are kept.\n\n'
+                'and adds camera preprocessing support when needed. Other category entries are kept. '
+                'HUDYAT retains its confidence thresholds, hold times, camera options, and capture settings.\n\n'
+                'Before registering the model, verify it against the installed HUDYAT runtime '
+                '(requires HUDYAT client dependencies, including TypeScript):\n\n'
+                '```powershell\nnode verify-bundle.mjs . "D:/path/to/your/HUDYAT"\n```\n\n'
                 'To activate the imported release, run in HUDYAT/server:\n\n'
                 '```powershell\nnpm run models:register\n```\n\n'
                 'Then rebuild/restart HUDYAT and re-enter the category online. '
                 'Exporting and importing do not change the database until you run models:register.\n'
+                '\nIf the installer reports changed camera code, a different preprocessing integration, '
+                'or a different test command, that is a HUDYAT code compatibility check. '
+                'Share the exact message to identify the required update; changing the project path alone '
+                'does not resolve a code compatibility error.\n\n'
                 'Alphabet still uses HUDYAT\'s held-pose capture; this export does not establish motion accuracy for J/Z.\n')
         os.replace(bundle, output)
     return output
