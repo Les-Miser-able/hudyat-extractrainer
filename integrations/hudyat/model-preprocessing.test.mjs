@@ -29,6 +29,16 @@ test('hand-relative preprocessing preserves wrist movement and zeroes missing ha
   assert.ok(Math.abs(result[0][27] - result[1][27]) < 1e-6);
 });
 
+test('HUDYAT pose normalization stays per-frame while trainer sequence normalization retains movement', () => {
+  const frames=[frame(),frame(.4,.5)];
+  const pose=preprocessSequence(frames,640,480,{normalization:'hand-relative-v1'});
+  const sequence=preprocessSequence(frames,640,480,{normalization:'hand-relative-sequence-v1'});
+  assert.equal(normalizationFor({normalization:'hand-relative-v1'}),'hand-relative-v1');
+  assert.equal(pose[0][0],0);assert.equal(pose[1][0],0);
+  assert.ok(sequence[1][0]>0);
+  pose[0].forEach((value,i)=>assert.ok(Math.abs(value-pose[1][i])<1e-5));
+});
+
 test('hand-relative poses are invariant to image translation and uniform scale', () => {
   const first = frame(), shifted = new Float32Array(first);
   for (let j = 0; j < 21; j++) {

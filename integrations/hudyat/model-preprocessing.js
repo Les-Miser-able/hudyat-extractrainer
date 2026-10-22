@@ -1,7 +1,7 @@
 // Camera features shared with the trainer export convention.
 export function normalizationFor(preprocessing={}) {
   const mode=Object.hasOwn(preprocessing,'normalization')?preprocessing.normalization:'image';
-  if(!['image','hand-relative-sequence-v1'].includes(mode))
+  if(!['image','hand-relative-v1','hand-relative-sequence-v1'].includes(mode))
     throw new Error('Unsupported model preprocessing: '+mode);
   return mode;
 }
@@ -41,5 +41,8 @@ export function normalizeFrames(frames,width,height) {
 }
 
 export function preprocessSequence(frames, width, height, preprocessing = {}) {
-  return normalizationFor(preprocessing) === 'image' ? frames : normalizeFrames(frames, width, height);
+  const mode=normalizationFor(preprocessing);
+  if(mode==='image')return frames;
+  if(mode==='hand-relative-v1')return frames.map(frame=>normalizeFrames([frame],width,height)[0]);
+  return normalizeFrames(frames, width, height);
 }

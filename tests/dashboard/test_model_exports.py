@@ -3,6 +3,8 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -140,8 +142,34 @@ class ModelExportTests(unittest.TestCase):
             self.assertIn('install_hudyat.py', archive.namelist())
             self.assertIn('model-preprocessing.js', archive.namelist())
             self.assertIn('HUDYAT_IMPORT.md', archive.namelist())
+            self.assertIn('verify-bundle.mjs', archive.namelist())
+            self.assertIn('runtime-probe.mjs', archive.namelist())
             self.assertNotIn('best.keras', archive.namelist())
         self.assertEqual(list(self.output.parent.glob('.hudyat-export-*')), [])
+
+    def test_bundle_install_instructions_use_the_recipients_hudyat_location(self):
+        self.bundle()
+        with ZipFile(self.output) as archive:
+            guide = archive.read('HUDYAT_IMPORT.md').decode('utf-8')
+        self.assertNotIn('C:/Users/Russel', guide)
+        self.assertIn('D:/path/to/your/HUDYAT', guide)
+        self.assertIn('Replace', guide)
+        self.assertIn('client/', guide)
+        self.assertIn('server/', guide)
+
+    def test_extracted_installer_works_with_a_different_project_path_and_working_directory(self):
+        folder, original = self.extracted(), self.hudyat()
+        project = self.root / 'friend projects' / 'My HUDYAT checkout'
+        project.parent.mkdir()
+        shutil.copytree(original, project)
+        before = {p.relative_to(original): p.read_bytes() for p in original.rglob('*') if p.is_file()}
+        result = subprocess.run([sys.executable, str(folder / 'install_hudyat.py'), '--project', str(project)],
+                                cwd=self.root, capture_output=True, encoding='utf-8', timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('Imported Alphabet', result.stdout)
+        entries = json.loads((project / 'server/model-assets/catalog.json').read_text())['categories']
+        self.assertEqual(next(e['version'] for e in entries if e['id'] == 'alphabet'), 'aabbccddeeff0011')
+        self.assertEqual(before, {p.relative_to(original): p.read_bytes() for p in original.rglob('*') if p.is_file()})
 
     def test_failed_conversion_wrong_detector_and_existing_output_preserve_work(self):
         with patch('fsl_trainer.dashboard.model_exports._convert', side_effect=SystemExit(2)):
@@ -199,6 +227,42 @@ class ModelExportTests(unittest.TestCase):
             apply_changes(runtime_changes(project))
         self.assertEqual(runtime.read_text(), 'different application')
         self.assertFalse((runtime.parent / 'model-preprocessing.js').exists())
+
+    def test_current_hudyat_runtime_import_preserves_app_settings_and_supports_sequence_models(self):
+        folder, project = self.extracted(), self.hudyat()
+        source = project / 'client/src/features/fsl-recognition'
+        for name in ('category-runtime.ts', 'category-recognition.tsx'):
+            shutil.copy2(ROOT / 'tests/fixtures/hudyat-current' / name, source / name)
+        package_path = project / 'client/package.json'
+        package_path.write_text(json.dumps({'scripts': {'test':
+            'node --experimental-strip-types --test tests/gesture-lock.test.mjs tests/timed-segmenter.test.mjs'}}))
+        settings = source / 'experiment.ts'
+        settings.write_text('export const settings = {confidence: .8, holdMs: 1200};')
+        import_bundle(folder, project)
+        runtime = (source / 'category-runtime.ts').read_text()
+        recognition = (source / 'category-recognition.tsx').read_text()
+        self.assertIn('sequenceRelative', runtime)
+        self.assertIn('preprocessSequence(frames', runtime)
+        self.assertIn('current.prepareSign(', recognition)
+        self.assertIn('(result.score??0)>=.8 && (result.margin??0)>=.15', recognition)
+        self.assertEqual(settings.read_text(), 'export const settings = {confidence: .8, holdMs: 1200};')
+        command = json.loads(package_path.read_text())['scripts']['test']
+        self.assertTrue(command.startswith('node --experimental-strip-types --test '))
+        self.assertIn('tests/timed-segmenter.test.mjs', command)
+        before = {p.relative_to(project): p.read_bytes() for p in project.rglob('*') if p.is_file()}
+        import_bundle(folder, project)
+        self.assertEqual(before, {p.relative_to(project): p.read_bytes() for p in project.rglob('*') if p.is_file()})
+
+    def test_changed_current_capture_code_is_rejected_before_modifying_any_files(self):
+        folder, project = self.extracted(), self.hudyat()
+        source = project / 'client/src/features/fsl-recognition'
+        for name in ('category-runtime.ts', 'category-recognition.tsx'):
+            shutil.copy2(ROOT / 'tests/fixtures/hudyat-current' / name, source / name)
+        (source / 'category-recognition.tsx').write_text('different capture integration')
+        before = {p.relative_to(project): p.read_bytes() for p in project.rglob('*') if p.is_file()}
+        with self.assertRaisesRegex(ValueError, 'camera code has changed'):
+            import_bundle(folder, project)
+        self.assertEqual(before, {p.relative_to(project): p.read_bytes() for p in project.rglob('*') if p.is_file()})
 
     def test_failed_helper_install_leaves_the_existing_camera_imports_intact(self):
         project = self.hudyat()
